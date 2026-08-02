@@ -1,0 +1,15 @@
+{
+  "name": "dota-pick-helper",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run start:dev --workspace apps/api",
+    "dev:web": "npm run dev --workspace apps/web",
+    "build": "npm run build --workspaces --if-present",
+    "build:shared": "npm run build --workspace packages/shared-types"
+  }
+}

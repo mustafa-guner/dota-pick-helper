@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+@theme {
+  --color-dota-bg: #14151a;
+  --color-dota-panel: #1c1e25;
+  --color-dota-panel-alt: #22242c;
+  --color-dota-border: #2c2f3a;
+  --color-str: #a5433f;
+  --color-agi: #59a463;
+  --color-int: #3f8fd6;
+  --color-universal: #c9a227;
+  --color-gold: #cbb26a;
+}
+
+body {
+  background-color: var(--color-dota-bg);
+  color: #e8e6e3;
+  font-family:
+    'Inter',
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-dota-bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-dota-border);
+  border-radius: 999px;
+}
