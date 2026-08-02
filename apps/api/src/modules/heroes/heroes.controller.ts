@@ -28,8 +28,8 @@ export class HeroesController {
       this.patchesService.getOrRefreshLatest(),
     ]);
 
-    // AI analysis is a best-effort enhancement — if Claude is unavailable (missing key, rate
-    // limit, outage), the hero's kit/stats should still render rather than 500ing the page.
+    // AI analysis is a best-effort enhancement — if Ollama is unavailable (not running,
+    // model not pulled, etc.), the hero's kit/stats should still render rather than 500ing the page.
     const roleAnalysis = await this.aiAnalysisService
       .getOrCreateAnalysis(id, latestPatch)
       .catch((error: Error) => {

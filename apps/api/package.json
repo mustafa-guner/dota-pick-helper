@@ -9,7 +9,6 @@
     "start:prod": "node dist/main"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.32.0",
     "@dota-pick-helper/shared-types": "0.1.0",
     "@nestjs/axios": "^3.1.0",
     "@nestjs/common": "^10.4.0",

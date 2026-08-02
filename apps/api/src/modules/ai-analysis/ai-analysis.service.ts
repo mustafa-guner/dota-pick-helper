@@ -5,7 +5,7 @@ import { RoleAnalysis, RoleHistoryEntry } from '@dota-pick-helper/shared-types';
 import { Hero } from '../heroes/entities/hero.entity';
 import { PatchSnapshot } from '../patches/entities/patch-snapshot.entity';
 import { PatchesService } from '../patches/patches.service';
-import { ClaudeClientService } from './claude-client.service';
+import { OllamaClientService } from './ollama-client.service';
 import { HeroRoleAnalysis } from './entities/hero-role-analysis.entity';
 import { buildRoleAnalysisPrompt } from './prompts/role-analysis.prompt';
 
@@ -16,7 +16,7 @@ export class AiAnalysisService {
     @InjectRepository(HeroRoleAnalysis)
     private readonly analysisRepository: Repository<HeroRoleAnalysis>,
     private readonly patchesService: PatchesService,
-    private readonly claudeClient: ClaudeClientService,
+    private readonly ollamaClient: OllamaClientService,
   ) {}
 
   /** Returns the cached analysis for (hero, patch), computing and caching it if absent. */
@@ -62,7 +62,7 @@ export class AiAnalysisService {
     ]);
 
     const { system, user } = buildRoleAnalysisPrompt({ hero, patch, heroChange, previous });
-    const modelOutput = await this.claudeClient.getRoleRecommendation(system, user);
+    const modelOutput = await this.ollamaClient.getRoleRecommendation(system, user);
 
     const existing = await this.analysisRepository.findOneBy({
       heroId,
