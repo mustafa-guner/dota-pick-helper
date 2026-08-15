@@ -1,0 +1,71 @@
+networks:
+  internal:
+  web:
+    external: true
+    name: root_default
+
+volumes:
+  postgres_data:
+  ollama_data:
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    networks:
+      - internal
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  ollama:
+    image: ollama/ollama
+    restart: unless-stopped
+    networks:
+      - internal
+    volumes:
+      - ollama_data:/root/.ollama
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - ollama
+    networks:
+      - internal
+      - web
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL}
+      CORS_ORIGIN: https://dota.cypsoft.tech
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=root_default
+      - traefik.http.routers.dota-api.rule=Host(`dota.cypsoft.tech`) && PathPrefix(`/api`)
+      - traefik.http.routers.dota-api.entrypoints=web,websecure
+      - traefik.http.routers.dota-api.tls=true
+      - traefik.http.routers.dota-api.tls.certresolver=mytlschallenge
+      - traefik.http.services.dota-api.loadbalancer.server.port=3000
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    networks:
+      - web
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=root_default
+      - traefik.http.routers.dota-web.rule=Host(`dota.cypsoft.tech`)
+      - traefik.http.routers.dota-web.entrypoints=web,websecure
+      - traefik.http.routers.dota-web.tls=true
+      - traefik.http.routers.dota-web.tls.certresolver=mytlschallenge
+      - traefik.http.services.dota-web.loadbalancer.server.port=80
