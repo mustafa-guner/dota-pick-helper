@@ -12,6 +12,6 @@ import { AiAnalysisModule } from '../ai-analysis/ai-analysis.module';
   imports: [TypeOrmModule.forFeature([Hero]), HttpModule, PatchesModule, AiAnalysisModule],
   controllers: [HeroesController],
   providers: [HeroesService, HeroSyncService],
-  exports: [HeroesService],
+  exports: [HeroesService, HeroSyncService],
 })
 export class HeroesModule {}

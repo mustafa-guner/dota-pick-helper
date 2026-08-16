@@ -45,6 +45,8 @@ services:
       OLLAMA_BASE_URL: http://ollama:11434
       OLLAMA_MODEL: ${OLLAMA_MODEL}
       CORS_ORIGIN: https://dota.cypsoft.tech
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      ADMIN_TOKEN_SECRET: ${ADMIN_TOKEN_SECRET}
     labels:
       - traefik.enable=true
       - traefik.docker.network=root_default

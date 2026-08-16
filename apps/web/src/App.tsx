@@ -1,6 +1,7 @@
 import { Route, Routes } from 'react-router-dom';
 import HeroListPage from './pages/HeroListPage';
 import HeroDetailPage from './pages/HeroDetailPage';
+import AdminPage from './pages/AdminPage';
 import Footer from './components/Footer';
 
 export default function App() {
@@ -10,6 +11,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<HeroListPage />} />
           <Route path="/heroes/:id" element={<HeroDetailPage />} />
+          <Route path="/admin" element={<AdminPage />} />
         </Routes>
       </div>
       <Footer />

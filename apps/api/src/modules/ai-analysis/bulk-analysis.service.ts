@@ -29,6 +29,11 @@ export class BulkAnalysisService {
     return { ...this.status };
   }
 
+  async countPending(patchVersion: string): Promise<number> {
+    const pendingIds = await this.findPendingHeroIds(patchVersion);
+    return pendingIds.length;
+  }
+
   /**
    * Finds heroes without a cached analysis for the current patch and, if any exist, kicks off
    * analyzing them one at a time in the background (each Ollama call is CPU-bound and can take

@@ -1,0 +1,212 @@
+import { FormEvent, useEffect, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ApiError, adminApi, clearAdminToken, getAdminToken, setAdminToken } from '../api/client';
+import { ROLE_LABELS } from '../lib/roleLabels';
+
+function formatDate(iso: string | null): string {
+  return iso ? new Date(iso).toLocaleString() : '—';
+}
+
+export default function AdminPage() {
+  const [authed, setAuthed] = useState(() => !!getAdminToken());
+  const [password, setPassword] = useState('');
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+
+  const loginMutation = useMutation({
+    mutationFn: (password: string) => adminApi.login(password),
+    onSuccess: (data) => {
+      setAdminToken(data.token);
+      setAuthed(true);
+      setLoginError(null);
+      setPassword('');
+    },
+    onError: (error) => {
+      setLoginError(
+        error instanceof ApiError && error.status === 401
+          ? 'Wrong password.'
+          : 'Login failed — is the API reachable?',
+      );
+    },
+  });
+
+  const metricsQuery = useQuery({
+    queryKey: ['admin', 'metrics'],
+    queryFn: adminApi.getMetrics,
+    enabled: authed,
+    refetchInterval: (query) => (query.state.data?.bulkAnalysis.running ? 5000 : 15000),
+  });
+
+  const heroesQuery = useQuery({
+    queryKey: ['admin', 'heroes'],
+    queryFn: adminApi.listHeroes,
+    enabled: authed,
+  });
+
+  // Bounce back to the login form if the stored token was rejected (expired/invalid).
+  useEffect(() => {
+    const error = metricsQuery.error ?? heroesQuery.error;
+    if (error instanceof ApiError && error.status === 401) {
+      clearAdminToken();
+      setAuthed(false);
+    }
+  }, [metricsQuery.error, heroesQuery.error]);
+
+  const syncMutation = useMutation({
+    mutationFn: adminApi.syncHeroes,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin'] });
+    },
+  });
+
+  const bulkMutation = useMutation({
+    mutationFn: adminApi.triggerBulkAnalysis,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'metrics'] });
+    },
+  });
+
+  const analyzeMutation = useMutation({
+    mutationFn: (heroId: number) => adminApi.analyzeHero(heroId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'heroes'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'metrics'] });
+    },
+  });
+
+  if (!authed) {
+    const handleSubmit = (e: FormEvent) => {
+      e.preventDefault();
+      loginMutation.mutate(password);
+    };
+
+    return (
+      <div className="mx-auto max-w-sm px-4 py-16">
+        <h1 className="text-xl font-bold text-gold">Admin Login</h1>
+        <form onSubmit={handleSubmit} className="mt-6 space-y-3">
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Password"
+            autoFocus
+            className="w-full rounded-md border border-dota-border bg-dota-panel-alt px-3 py-2 text-sm text-white outline-none focus:border-gold/60"
+          />
+          <button
+            type="submit"
+            disabled={loginMutation.isPending || !password}
+            className="w-full rounded-md border border-dota-border px-3 py-2 text-sm text-gray-300 hover:border-gold/60 hover:text-gold disabled:opacity-50"
+          >
+            {loginMutation.isPending ? 'Logging in…' : 'Log in'}
+          </button>
+          {loginError && <p className="text-sm text-red-300">{loginError}</p>}
+        </form>
+      </div>
+    );
+  }
+
+  const metrics = metricsQuery.data;
+  const bulk = metrics?.bulkAnalysis;
+
+  return (
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-10">
+      <header className="mb-8 flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-gold">Admin Dashboard</h1>
+        <button
+          onClick={() => {
+            clearAdminToken();
+            setAuthed(false);
+          }}
+          className="text-xs text-gray-400 hover:text-gold"
+        >
+          Log out
+        </button>
+      </header>
+
+      {metrics && (
+        <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          {[
+            ['Patch', metrics.patchVersion],
+            ['Model', metrics.ollamaModel],
+            ['Total heroes', metrics.totalHeroes],
+            ['Analyzed', metrics.analyzedForCurrentPatch],
+            ['Pending', metrics.pendingForCurrentPatch],
+            ['Bulk status', bulk?.running ? `${bulk.completed}/${bulk.total}` : 'Idle'],
+          ].map(([label, value]) => (
+            <div
+              key={label}
+              className="rounded-lg border border-dota-border bg-dota-panel p-3 text-center"
+            >
+              <div className="text-xs text-gray-500">{label}</div>
+              <div className="mt-1 text-sm font-semibold text-white">{value}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="mb-8 flex flex-wrap gap-3">
+        <button
+          onClick={() => syncMutation.mutate()}
+          disabled={syncMutation.isPending}
+          className="rounded-md border border-dota-border px-3 py-1.5 text-xs text-gray-300 hover:border-gold/60 hover:text-gold disabled:opacity-50"
+        >
+          {syncMutation.isPending ? 'Syncing…' : 'Sync heroes from OpenDota'}
+        </button>
+        <button
+          onClick={() => bulkMutation.mutate()}
+          disabled={bulkMutation.isPending || bulk?.running}
+          className="rounded-md border border-dota-border px-3 py-1.5 text-xs text-gray-300 hover:border-gold/60 hover:text-gold disabled:opacity-50"
+        >
+          {bulk?.running ? `Analyzing ${bulk.completed}/${bulk.total}…` : 'Analyze pending heroes'}
+        </button>
+      </div>
+
+      <div className="overflow-x-auto rounded-lg border border-dota-border">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-dota-panel-alt text-xs uppercase text-gray-500">
+            <tr>
+              <th className="px-3 py-2">Hero</th>
+              <th className="px-3 py-2">Roles</th>
+              <th className="px-3 py-2">Patch</th>
+              <th className="px-3 py-2">Analyzed</th>
+              <th className="px-3 py-2" />
+            </tr>
+          </thead>
+          <tbody>
+            {heroesQuery.data?.map((hero) => {
+              const isThisRowAnalyzing =
+                analyzeMutation.isPending && analyzeMutation.variables === hero.id;
+              return (
+                <tr key={hero.id} className="border-t border-dota-border">
+                  <td className="flex items-center gap-2 px-3 py-2">
+                    <img src={hero.imageUrl} alt="" className="h-8 w-14 rounded object-cover" />
+                    {hero.localizedName}
+                  </td>
+                  <td className="px-3 py-2 text-gray-300">
+                    {hero.roles
+                      ? [...hero.roles]
+                          .sort((a, b) => a.rank - b.rank)
+                          .map((r) => ROLE_LABELS[r.role])
+                          .join(', ')
+                      : '—'}
+                  </td>
+                  <td className="px-3 py-2 text-gray-500">{hero.patchVersion ?? '—'}</td>
+                  <td className="px-3 py-2 text-gray-500">{formatDate(hero.analyzedAt)}</td>
+                  <td className="px-3 py-2 text-right">
+                    <button
+                      onClick={() => analyzeMutation.mutate(hero.id)}
+                      disabled={analyzeMutation.isPending}
+                      className="rounded-md border border-dota-border px-2.5 py-1 text-xs text-gray-300 hover:border-gold/60 hover:text-gold disabled:opacity-50"
+                    >
+                      {isThisRowAnalyzing ? 'Analyzing…' : 'Re-analyze'}
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}

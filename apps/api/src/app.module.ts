@@ -7,6 +7,7 @@ import { DatabaseModule } from './database/database.module';
 import { HeroesModule } from './modules/heroes/heroes.module';
 import { PatchesModule } from './modules/patches/patches.module';
 import { AiAnalysisModule } from './modules/ai-analysis/ai-analysis.module';
+import { AdminModule } from './modules/admin/admin.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { AiAnalysisModule } from './modules/ai-analysis/ai-analysis.module';
     PatchesModule,
     AiAnalysisModule,
     HeroesModule,
+    AdminModule,
   ],
 })
 export class AppModule {}

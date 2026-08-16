@@ -1,5 +1,5 @@
 import { Link, useParams } from 'react-router-dom';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import RoleBadge from '../components/RoleBadge';
 import PatchTag from '../components/PatchTag';
@@ -16,7 +16,6 @@ const ATTR_LABELS: Record<string, string> = {
 export default function HeroDetailPage() {
   const { id } = useParams<{ id: string }>();
   const heroId = Number(id);
-  const queryClient = useQueryClient();
 
   const heroQuery = useQuery({
     queryKey: ['hero', heroId],
@@ -28,24 +27,6 @@ export default function HeroDetailPage() {
     queryKey: ['roleHistory', heroId],
     queryFn: () => api.getRoleHistory(heroId),
     enabled: Number.isFinite(heroId),
-  });
-
-  // Hero data returns roleAnalysis only if already cached (never blocks on Ollama). When it's
-  // missing, fetch it separately — a cache miss can take minutes of CPU-bound inference, so this
-  // must not hold up the rest of the page.
-  const roleAnalysisQuery = useQuery({
-    queryKey: ['roleAnalysis', heroId],
-    queryFn: () => api.getRoleAnalysis(heroId),
-    enabled: Number.isFinite(heroId) && heroQuery.isSuccess && !heroQuery.data.roleAnalysis,
-  });
-
-  const reanalyzeMutation = useMutation({
-    mutationFn: () => api.forceAnalyze(heroId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['hero', heroId] });
-      queryClient.invalidateQueries({ queryKey: ['roleHistory', heroId] });
-      queryClient.invalidateQueries({ queryKey: ['roleAnalysis', heroId] });
-    },
   });
 
   if (heroQuery.isLoading) {
@@ -68,8 +49,9 @@ export default function HeroDetailPage() {
   }
 
   const hero = heroQuery.data;
-  const roleAnalysis = hero.roleAnalysis ?? roleAnalysisQuery.data ?? null;
-  const sortedRoles = roleAnalysis ? [...roleAnalysis.roles].sort((a, b) => a.rank - b.rank) : [];
+  const sortedRoles = hero.roleAnalysis
+    ? [...hero.roleAnalysis.roles].sort((a, b) => a.rank - b.rank)
+    : [];
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-10">
@@ -123,16 +105,9 @@ export default function HeroDetailPage() {
                 <h2 className="text-lg font-semibold text-white">Recommended Roles</h2>
                 <PatchTag version={hero.currentPatchVersion} />
               </div>
-              <button
-                onClick={() => reanalyzeMutation.mutate()}
-                disabled={reanalyzeMutation.isPending}
-                className="rounded-md border border-dota-border px-2.5 py-1 text-xs text-gray-300 hover:border-gold/60 hover:text-gold disabled:opacity-50"
-              >
-                {reanalyzeMutation.isPending ? 'Re-analyzing…' : 'Re-analyze'}
-              </button>
             </div>
 
-            {roleAnalysis ? (
+            {hero.roleAnalysis ? (
               <>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {sortedRoles.map((r) => (
@@ -140,13 +115,9 @@ export default function HeroDetailPage() {
                   ))}
                 </div>
                 <p className="mt-3 text-sm leading-relaxed text-gray-300">
-                  {roleAnalysis.summary}
+                  {hero.roleAnalysis.summary}
                 </p>
               </>
-            ) : roleAnalysisQuery.isFetching ? (
-              <p className="mt-3 text-sm text-gray-500">
-                Analyzing role… (first view per patch can take a few minutes)
-              </p>
             ) : (
               <p className="mt-3 text-sm text-gray-500">Role analysis unavailable.</p>
             )}

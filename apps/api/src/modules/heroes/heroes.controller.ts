@@ -1,7 +1,6 @@
-import { Controller, Get, Logger, Param, ParseIntPipe, Post } from '@nestjs/common';
+import { Controller, Get, Logger, Param, ParseIntPipe } from '@nestjs/common';
 import { HeroDetail, HeroesGrouped, RoleHistoryEntry } from '@dota-pick-helper/shared-types';
 import { HeroesService } from './heroes.service';
-import { HeroSyncService } from './hero-sync.service';
 import { PatchesService } from '../patches/patches.service';
 import { AiAnalysisService } from '../ai-analysis/ai-analysis.service';
 
@@ -11,7 +10,6 @@ export class HeroesController {
 
   constructor(
     private readonly heroesService: HeroesService,
-    private readonly heroSyncService: HeroSyncService,
     private readonly patchesService: PatchesService,
     private readonly aiAnalysisService: AiAnalysisService,
   ) {}
@@ -28,9 +26,8 @@ export class HeroesController {
       this.patchesService.getOrRefreshLatest(),
     ]);
 
-    // Cache-only lookup — never calls Ollama, so the hero's kit/stats always render fast.
-    // Uncached analysis is fetched separately by the client via GET /ai/analysis/:heroId,
-    // since a cache miss can take minutes of CPU-bound inference.
+    // Cache-only lookup — never calls Ollama. Public requests never trigger inference; only the
+    // scheduler and the admin panel do (see modules/admin).
     const roleAnalysis = await this.aiAnalysisService
       .getCachedAnalysis(id, latestPatch.version)
       .catch((error: Error) => {
@@ -44,10 +41,5 @@ export class HeroesController {
   @Get(':id/role-history')
   roleHistory(@Param('id', ParseIntPipe) id: number): Promise<RoleHistoryEntry[]> {
     return this.aiAnalysisService.getRoleHistory(id);
-  }
-
-  @Post('sync')
-  sync(): Promise<{ synced: number }> {
-    return this.heroSyncService.syncAll();
   }
 }
