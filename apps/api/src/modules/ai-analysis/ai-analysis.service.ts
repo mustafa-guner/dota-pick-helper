@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { RoleAnalysis, RoleHistoryEntry } from '@dota-pick-helper/shared-types';
@@ -11,6 +11,8 @@ import { buildRoleAnalysisPrompt } from './prompts/role-analysis.prompt';
 
 @Injectable()
 export class AiAnalysisService {
+  private readonly logger = new Logger(AiAnalysisService.name);
+
   constructor(
     @InjectRepository(Hero) private readonly heroRepository: Repository<Hero>,
     @InjectRepository(HeroRoleAnalysis)
@@ -19,13 +21,24 @@ export class AiAnalysisService {
     private readonly ollamaClient: OllamaClientService,
   ) {}
 
-  /** Returns the cached analysis for (hero, patch), computing and caching it if absent. */
+  /**
+   * Returns the cached analysis for (hero, patch), computing and caching it if absent. Heroes
+   * with no patch notes in this patch almost never change role — those carry forward the most
+   * recent prior analysis instead of paying for a fresh (CPU-bound, slow) Ollama call.
+   */
   async getOrCreateAnalysis(heroId: number, patch: PatchSnapshot): Promise<RoleAnalysis> {
     const existing = await this.analysisRepository.findOneBy({
       heroId,
       patchVersion: patch.version,
     });
     if (existing) return this.toDto(existing);
+
+    const heroChange = await this.patchesService.getHeroChange(heroId, patch);
+    if (!heroChange) {
+      const carried = await this.carryForwardIfUnchanged(heroId, patch);
+      if (carried) return carried;
+    }
+
     return this.runAnalysis(heroId, patch);
   }
 
@@ -84,6 +97,30 @@ export class AiAnalysisService {
     entity.analyzedAt = new Date();
 
     const saved = await this.analysisRepository.save(entity);
+    return this.toDto(saved);
+  }
+
+  private async carryForwardIfUnchanged(
+    heroId: number,
+    patch: PatchSnapshot,
+  ): Promise<RoleAnalysis | null> {
+    const previous = await this.analysisRepository.findOne({
+      where: { heroId },
+      order: { analyzedAt: 'DESC' },
+    });
+    if (!previous) return null;
+
+    const carried = this.analysisRepository.create({
+      heroId,
+      patchId: patch.id,
+      patchVersion: patch.version,
+      roles: previous.roles,
+      summary: previous.summary,
+      rawModelResponse: previous.rawModelResponse,
+      analyzedAt: new Date(),
+    });
+    const saved = await this.analysisRepository.save(carried);
+    this.logger.log(`Carried forward analysis for hero ${heroId} (no changes in patch ${patch.version})`);
     return this.toDto(saved);
   }
 

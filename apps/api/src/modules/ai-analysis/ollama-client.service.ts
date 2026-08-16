@@ -66,7 +66,7 @@ export class OllamaClientService {
 
   constructor(private readonly configService: ConfigService) {
     this.baseUrl = this.configService.get<string>('ollamaBaseUrl') ?? 'http://localhost:11434';
-    this.model = this.configService.get<string>('ollamaModel') ?? 'llama3.1';
+    this.model = this.configService.get<string>('ollamaModel') ?? 'llama3.2:3b';
   }
 
   async getRoleRecommendation(system: string, user: string): Promise<RoleAnalysisModelOutput> {

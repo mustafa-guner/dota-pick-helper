@@ -2,7 +2,7 @@ export default () => ({
   port: parseInt(process.env.PORT ?? '3000', 10),
   databaseUrl: process.env.DATABASE_URL,
   ollamaBaseUrl: process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434',
-  ollamaModel: process.env.OLLAMA_MODEL ?? 'llama3.1',
+  ollamaModel: process.env.OLLAMA_MODEL ?? 'llama3.2:3b',
   openDotaBaseUrl: process.env.OPENDOTA_BASE_URL ?? 'https://api.opendota.com/api',
   dota2DatafeedBaseUrl: process.env.DOTA2_DATAFEED_BASE_URL ?? 'https://www.dota2.com/datafeed',
   patchRefreshCron: process.env.PATCH_REFRESH_CRON ?? '0 */6 * * *',
