@@ -1,4 +1,5 @@
 import type {
+  BulkAnalysisStatus,
   HeroDetail,
   HeroesGrouped,
   RoleAnalysis,
@@ -28,4 +29,7 @@ export const api = {
   getRoleAnalysis: (id: number) => request<RoleAnalysis>(`/ai/analysis/${id}`),
   forceAnalyze: (id: number) =>
     request<RoleAnalysis>(`/ai/analyze/${id}`, { method: 'POST' }),
+  triggerBulkAnalysis: () =>
+    request<BulkAnalysisStatus>('/ai/analyze-all', { method: 'POST' }),
+  getBulkAnalysisStatus: () => request<BulkAnalysisStatus>('/ai/analyze-all/status'),
 };
