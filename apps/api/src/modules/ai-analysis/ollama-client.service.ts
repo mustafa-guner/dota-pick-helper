@@ -102,21 +102,63 @@ export class OllamaClientService {
     );
 
     if (toolCall) {
-      const args = toolCall.function.arguments;
-      return (typeof args === 'string' ? JSON.parse(args) : args) as RoleAnalysisModelOutput;
+      try {
+        return this.parseModelOutput(toolCall.function.arguments);
+      } catch (error) {
+        this.logger.error(`Malformed tool call arguments: ${(error as Error).message}`);
+      }
     }
 
     // Some models ignore tool_choice and just answer in content — fall back to parsing that.
     const content = data.message?.content;
     if (content) {
       try {
-        return JSON.parse(content) as RoleAnalysisModelOutput;
-      } catch {
-        // fall through to error below
+        return this.parseModelOutput(content);
+      } catch (error) {
+        this.logger.error(`Malformed content body: ${(error as Error).message}`);
       }
     }
 
     this.logger.error('Ollama response did not include a usable tool call or JSON body');
     throw new InternalServerErrorException('AI analysis failed to produce a structured result');
+  }
+
+  /**
+   * Parses and validates the model's output shape. Local models occasionally nest a
+   * JSON-encoded array as a *string* inside an otherwise well-formed object (e.g. `roles` comes
+   * back as `"[{...}]"` instead of `[{...}]`) — this normalizes that and rejects anything that
+   * still doesn't match, rather than letting malformed data reach the database.
+   */
+  private parseModelOutput(raw: unknown): RoleAnalysisModelOutput {
+    const parsed: unknown = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!parsed || typeof parsed !== 'object') {
+      throw new Error('model output is not a JSON object');
+    }
+
+    let roles: unknown = (parsed as Record<string, unknown>).roles;
+    if (typeof roles === 'string') {
+      roles = JSON.parse(roles);
+    }
+    if (!Array.isArray(roles) || roles.length === 0) {
+      throw new Error('"roles" is not a non-empty array');
+    }
+    for (const entry of roles) {
+      if (
+        !entry ||
+        typeof entry !== 'object' ||
+        typeof (entry as Record<string, unknown>).role !== 'string' ||
+        typeof (entry as Record<string, unknown>).confidence !== 'number' ||
+        typeof (entry as Record<string, unknown>).rank !== 'number'
+      ) {
+        throw new Error('"roles" contains a malformed entry');
+      }
+    }
+
+    const summary = (parsed as Record<string, unknown>).summary;
+    if (typeof summary !== 'string') {
+      throw new Error('"summary" is not a string');
+    }
+
+    return { roles: roles as RoleAnalysisModelOutput['roles'], summary };
   }
 }
