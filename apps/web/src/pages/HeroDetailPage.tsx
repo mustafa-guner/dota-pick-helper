@@ -30,11 +30,21 @@ export default function HeroDetailPage() {
     enabled: Number.isFinite(heroId),
   });
 
+  // Hero data returns roleAnalysis only if already cached (never blocks on Ollama). When it's
+  // missing, fetch it separately — a cache miss can take minutes of CPU-bound inference, so this
+  // must not hold up the rest of the page.
+  const roleAnalysisQuery = useQuery({
+    queryKey: ['roleAnalysis', heroId],
+    queryFn: () => api.getRoleAnalysis(heroId),
+    enabled: Number.isFinite(heroId) && heroQuery.isSuccess && !heroQuery.data.roleAnalysis,
+  });
+
   const reanalyzeMutation = useMutation({
     mutationFn: () => api.forceAnalyze(heroId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['hero', heroId] });
       queryClient.invalidateQueries({ queryKey: ['roleHistory', heroId] });
+      queryClient.invalidateQueries({ queryKey: ['roleAnalysis', heroId] });
     },
   });
 
@@ -58,9 +68,8 @@ export default function HeroDetailPage() {
   }
 
   const hero = heroQuery.data;
-  const sortedRoles = hero.roleAnalysis
-    ? [...hero.roleAnalysis.roles].sort((a, b) => a.rank - b.rank)
-    : [];
+  const roleAnalysis = hero.roleAnalysis ?? roleAnalysisQuery.data ?? null;
+  const sortedRoles = roleAnalysis ? [...roleAnalysis.roles].sort((a, b) => a.rank - b.rank) : [];
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-10">
@@ -123,7 +132,7 @@ export default function HeroDetailPage() {
               </button>
             </div>
 
-            {hero.roleAnalysis ? (
+            {roleAnalysis ? (
               <>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {sortedRoles.map((r) => (
@@ -131,9 +140,13 @@ export default function HeroDetailPage() {
                   ))}
                 </div>
                 <p className="mt-3 text-sm leading-relaxed text-gray-300">
-                  {hero.roleAnalysis.summary}
+                  {roleAnalysis.summary}
                 </p>
               </>
+            ) : roleAnalysisQuery.isFetching ? (
+              <p className="mt-3 text-sm text-gray-500">
+                Analyzing role… (first view per patch can take a few minutes)
+              </p>
             ) : (
               <p className="mt-3 text-sm text-gray-500">Role analysis unavailable.</p>
             )}

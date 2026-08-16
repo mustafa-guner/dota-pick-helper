@@ -25,6 +25,7 @@ export const api = {
   getHeroesGrouped: () => request<HeroesGrouped>('/heroes'),
   getHeroDetail: (id: number) => request<HeroDetail>(`/heroes/${id}`),
   getRoleHistory: (id: number) => request<RoleHistoryEntry[]>(`/heroes/${id}/role-history`),
+  getRoleAnalysis: (id: number) => request<RoleAnalysis>(`/ai/analysis/${id}`),
   forceAnalyze: (id: number) =>
     request<RoleAnalysis>(`/ai/analyze/${id}`, { method: 'POST' }),
 };

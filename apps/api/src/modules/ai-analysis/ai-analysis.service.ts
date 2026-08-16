@@ -29,6 +29,12 @@ export class AiAnalysisService {
     return this.runAnalysis(heroId, patch);
   }
 
+  /** Cache-only lookup — never calls Ollama. Used where callers can't afford to block on inference. */
+  async getCachedAnalysis(heroId: number, patchVersion: string): Promise<RoleAnalysis | null> {
+    const existing = await this.analysisRepository.findOneBy({ heroId, patchVersion });
+    return existing ? this.toDto(existing) : null;
+  }
+
   async forceAnalyze(heroId: number): Promise<RoleAnalysis> {
     const patch = await this.patchesService.getOrRefreshLatest();
     return this.runAnalysis(heroId, patch);

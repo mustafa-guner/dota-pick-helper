@@ -28,12 +28,13 @@ export class HeroesController {
       this.patchesService.getOrRefreshLatest(),
     ]);
 
-    // AI analysis is a best-effort enhancement — if Ollama is unavailable (not running,
-    // model not pulled, etc.), the hero's kit/stats should still render rather than 500ing the page.
+    // Cache-only lookup — never calls Ollama, so the hero's kit/stats always render fast.
+    // Uncached analysis is fetched separately by the client via GET /ai/analysis/:heroId,
+    // since a cache miss can take minutes of CPU-bound inference.
     const roleAnalysis = await this.aiAnalysisService
-      .getOrCreateAnalysis(id, latestPatch)
+      .getCachedAnalysis(id, latestPatch.version)
       .catch((error: Error) => {
-        this.logger.warn(`Role analysis unavailable for hero ${id}: ${error.message}`);
+        this.logger.warn(`Role analysis lookup failed for hero ${id}: ${error.message}`);
         return null;
       });
 
