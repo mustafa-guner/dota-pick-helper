@@ -11,7 +11,15 @@ import { OpenDotaExplorerService } from './opendota-explorer.service';
 // 59 over 90 days — 21 was too narrow to reliably clear RoleScoringService's 5-game floor for
 // anything but heavily-contested heroes. 45 trades some "current patch only" freshness for
 // enough sample size to actually produce a role call for most of the hero pool.
-const MIN_LOOKBACK_DAYS = 45;
+const PRIMARY_LOOKBACK_DAYS = 45;
+// If 45 days isn't enough, retry once with a much wider window before giving up. Verified live:
+// Anti-Mage had only 4 pro games in 45 days but 80 in 90 — a real "currently out of meta" signal
+// (657 total pro matches in the same 45-day window, so it's not simply an off-season data gap),
+// but a wider-window answer is still more useful than none for a hero that famous.
+const FALLBACK_LOOKBACK_DAYS = 90;
+// Mirrors RoleScoringService.MIN_TOTAL_GAMES — duplicated rather than imported to avoid a
+// cross-module circular import for one small, stable constant. Keep in sync if either changes.
+const MIN_GAMES_BEFORE_WIDENING = 5;
 const DELAY_BETWEEN_HEROES_MS = 300;
 
 // Team-wide GPM rank (1 = highest farm on the team, 5 = lowest) mapped straight to the
@@ -93,18 +101,34 @@ export class MatchStatsCollectorService {
 
   private async collectForOneHero(heroId: number, patch: PatchSnapshot): Promise<void> {
     const windowEnd = Math.floor(Date.now() / 1000);
-    // Always look back at least MIN_LOOKBACK_DAYS so a brand-new patch still has some sample,
-    // even if it's partly pre-patch pro data — a documented v1 approximation.
-    const since = Math.min(patch.patchTimestamp, windowEnd - MIN_LOOKBACK_DAYS * 86400);
+    // Always look back at least PRIMARY_LOOKBACK_DAYS so a brand-new patch still has some
+    // sample, even if it's partly pre-patch pro data — a documented v1 approximation.
+    const primarySince = Math.min(patch.patchTimestamp, windowEnd - PRIMARY_LOOKBACK_DAYS * 86400);
 
     try {
-      const rows = await this.queryHeroStats(heroId, since);
-      await this.saveRows(heroId, patch, rows, since, windowEnd);
+      let rows = await this.queryHeroStats(heroId, primarySince);
+      let windowStart = primarySince;
+      const totalGames = this.sumGames(rows);
+
+      if (totalGames < MIN_GAMES_BEFORE_WIDENING) {
+        const fallbackSince = windowEnd - FALLBACK_LOOKBACK_DAYS * 86400;
+        const fallbackRows = await this.queryHeroStats(heroId, fallbackSince);
+        if (this.sumGames(fallbackRows) > totalGames) {
+          rows = fallbackRows;
+          windowStart = fallbackSince;
+        }
+      }
+
+      await this.saveRows(heroId, patch, rows, windowStart, windowEnd);
     } catch (error) {
       this.logger.warn(
         `Match stats collection failed for hero ${heroId}: ${(error as Error).message}`,
       );
     }
+  }
+
+  private sumGames(rows: TeamRankRow[]): number {
+    return rows.reduce((sum, row) => sum + parseInt(row.games, 10), 0);
   }
 
   private async queryHeroStats(heroId: number, since: number): Promise<TeamRankRow[]> {
