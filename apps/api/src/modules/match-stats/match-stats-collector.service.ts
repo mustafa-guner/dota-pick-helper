@@ -14,9 +14,23 @@ import { OpenDotaExplorerService } from './opendota-explorer.service';
 const MIN_LOOKBACK_DAYS = 45;
 const DELAY_BETWEEN_HEROES_MS = 300;
 
-interface LaneStatsRow {
-  lane_role: number;
-  gpm_rank: number;
+// Team-wide GPM rank (1 = highest farm on the team, 5 = lowest) mapped straight to the
+// conventional position 1-5 farm-priority ordering. Replaces an earlier approach that paired
+// players sharing OpenDota's lane_role=1 tag and compared GPM within the pair — verified live
+// that this was unreliable (Crystal Maiden was the *only* player tagged lane_role=1 on her team
+// in 10/10 recent pro games, no partner to compare against, so it always fell out as SAFELANE
+// core). Ranking across the full team by GPM has no such gap and, as a bonus, distinguishes
+// SOFT_SUPPORT from HARD_SUPPORT, which the old approach could never produce.
+const RANK_TO_ROLE: Record<number, HeroRole> = {
+  1: HeroRole.SAFELANE,
+  2: HeroRole.MID,
+  3: HeroRole.OFFLANE,
+  4: HeroRole.SOFT_SUPPORT,
+  5: HeroRole.HARD_SUPPORT,
+};
+
+interface TeamRankRow {
+  team_gpm_rank: number;
   games: string; // Explorer returns bigint counts as strings
   wins: string;
   avg_gpm: string;
@@ -28,11 +42,11 @@ interface CollectorStatus {
 }
 
 /**
- * Pulls pro-match win/pick rates per hero+lane from OpenDota Explorer and stores them as
+ * Pulls pro-match win/pick rates per hero+position from OpenDota Explorer and stores them as
  * HeroLaneStats — the evidence RoleScoringService turns into role recommendations. Loops per
- * hero rather than one global query: verified live that Explorer times out (~15s) on broad
- * unfiltered aggregates but a hero-scoped query (including the GPM-rank window function used to
- * split safelane core from hard support) runs in ~1s.
+ * hero rather than one global query: verified live that Explorer times out (~15s) on a
+ * team-wide-rank query left unscoped by hero, but scoping to the specific match_ids a hero
+ * appeared in first (see queryHeroStats) keeps it to ~1-1.5s per hero.
  */
 @Injectable()
 export class MatchStatsCollectorService {
@@ -67,10 +81,11 @@ export class MatchStatsCollectorService {
   }
 
   /**
-   * Collects fresh stats for a single hero right now (~1s). Used before an on-demand single-hero
-   * analysis so it never depends on the bulk job having run first — without this, a hero with no
-   * HeroLaneStats row yet would score 0 pro games and skip straight to "no data available"
-   * looking instant/broken, even though real data might exist and just hasn't been pulled yet.
+   * Collects fresh stats for a single hero right now (~1-1.5s). Used before an on-demand
+   * single-hero analysis so it never depends on the bulk job having run first — without this, a
+   * hero with no HeroLaneStats row yet would score 0 pro games and skip straight to "no data
+   * available" looking instant/broken, even though real data might exist and just hasn't been
+   * pulled yet.
    */
   async collectForHeroNow(heroId: number, patch: PatchSnapshot): Promise<void> {
     await this.collectForOneHero(heroId, patch);
@@ -92,72 +107,60 @@ export class MatchStatsCollectorService {
     }
   }
 
-  private async queryHeroStats(heroId: number, since: number): Promise<LaneStatsRow[]> {
+  private async queryHeroStats(heroId: number, since: number): Promise<TeamRankRow[]> {
+    // Two-step: first find the (small, hero-scoped, indexed) set of match_ids this hero appeared
+    // in, then rank ALL players within just those matches by GPM per team. Ranking must see the
+    // whole roster, not just this hero's row, so hero_id can't be filtered before the window
+    // function runs — but ranking with no match_id bound at all times out (~15s), hence the
+    // two-step scoping. Verified live at ~1-1.5s this way.
     const sql = `
-      WITH ranked AS (
-        SELECT
-          pm.lane_role,
-          pm.gold_per_min,
-          ((pm.player_slot < 128) = m.radiant_win) AS won,
-          RANK() OVER (
-            PARTITION BY pm.match_id, pm.lane_role, (pm.player_slot < 128)
-            ORDER BY pm.gold_per_min DESC
-          ) AS gpm_rank
+      WITH target AS (
+        SELECT DISTINCT pm.match_id
         FROM player_matches pm
         JOIN matches m ON pm.match_id = m.match_id
         WHERE m.leagueid IS NOT NULL
           AND m.start_time >= ${since}
           AND pm.hero_id = ${heroId}
-          AND pm.lane_role IS NOT NULL
+      ),
+      ranked AS (
+        SELECT
+          pm.match_id,
+          pm.hero_id,
+          pm.gold_per_min,
+          ((pm.player_slot < 128) = m.radiant_win) AS won,
+          RANK() OVER (
+            PARTITION BY pm.match_id, (pm.player_slot < 128)
+            ORDER BY pm.gold_per_min DESC
+          ) AS team_gpm_rank
+        FROM player_matches pm
+        JOIN matches m ON pm.match_id = m.match_id
+        WHERE pm.match_id IN (SELECT match_id FROM target)
       )
-      SELECT lane_role, gpm_rank, COUNT(*) AS games,
+      SELECT team_gpm_rank, COUNT(*) AS games,
              SUM(CASE WHEN won THEN 1 ELSE 0 END) AS wins,
              AVG(gold_per_min) AS avg_gpm
       FROM ranked
-      GROUP BY lane_role, gpm_rank
+      WHERE hero_id = ${heroId}
+      GROUP BY team_gpm_rank
     `;
-    return this.explorer.runQuery<LaneStatsRow>(sql);
-  }
-
-  /** OpenDota's raw lane_role doesn't distinguish position 1 from position 5 — the GPM rank
-   * within the safelane pairing does (higher GPM = core, lower = hard support). Offlane trios
-   * are too variable to split the same way, so SOFT_SUPPORT is never derived here (v1 gap,
-   * documented in the plan). */
-  private mapRole(laneRole: number, gpmRank: number): HeroRole | null {
-    if (laneRole === 2) return HeroRole.MID;
-    if (laneRole === 3) return HeroRole.OFFLANE;
-    if (laneRole === 1) return gpmRank === 1 ? HeroRole.SAFELANE : HeroRole.HARD_SUPPORT;
-    return null;
+    return this.explorer.runQuery<TeamRankRow>(sql);
   }
 
   private async saveRows(
     heroId: number,
     patch: PatchSnapshot,
-    rows: LaneStatsRow[],
+    rows: TeamRankRow[],
     windowStart: number,
     windowEnd: number,
   ): Promise<void> {
-    const byRole = new Map<HeroRole, { games: number; wins: number; gpmSum: number }>();
-
     for (const row of rows) {
-      const role = this.mapRole(row.lane_role, row.gpm_rank);
-      if (!role) continue;
+      const role = RANK_TO_ROLE[row.team_gpm_rank];
+      if (!role) continue; // ranks beyond 5 shouldn't occur in a 5-player team, but be defensive
 
       const games = parseInt(row.games, 10);
       const wins = parseInt(row.wins, 10);
       const avgGpm = parseFloat(row.avg_gpm);
 
-      const existing = byRole.get(role);
-      if (existing) {
-        existing.gpmSum += avgGpm * games;
-        existing.games += games;
-        existing.wins += wins;
-      } else {
-        byRole.set(role, { games, wins, gpmSum: avgGpm * games });
-      }
-    }
-
-    for (const [role, agg] of byRole) {
       const existing = await this.laneStatsRepository.findOneBy({
         heroId,
         patchVersion: patch.version,
@@ -172,9 +175,9 @@ export class MatchStatsCollectorService {
           role,
         });
 
-      entity.games = agg.games;
-      entity.wins = agg.wins;
-      entity.avgGpm = agg.games > 0 ? agg.gpmSum / agg.games : 0;
+      entity.games = games;
+      entity.wins = wins;
+      entity.avgGpm = avgGpm;
       entity.windowStart = windowStart;
       entity.windowEnd = windowEnd;
       entity.collectedAt = new Date();
