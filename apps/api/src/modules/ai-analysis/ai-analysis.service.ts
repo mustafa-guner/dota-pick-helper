@@ -17,6 +17,7 @@ const NO_DATA_SUMMARY = 'No professional match data is available yet for this he
 @Injectable()
 export class AiAnalysisService {
   private readonly logger = new Logger(AiAnalysisService.name);
+  private readonly analyzingHeroIds = new Set<number>();
 
   constructor(
     @InjectRepository(Hero) private readonly heroRepository: Repository<Hero>,
@@ -61,6 +62,12 @@ export class AiAnalysisService {
     return this.runAnalysis(heroId, patch);
   }
 
+  /** Hero IDs currently mid-analysis (inside runAnalysis, below) — lets the frontend show an
+   * in-progress state that survives a page refresh, unlike local mutation state. */
+  getAnalyzingHeroIds(): number[] {
+    return [...this.analyzingHeroIds];
+  }
+
   async getRoleHistory(heroId: number): Promise<RoleHistoryEntry[]> {
     const rows = await this.analysisRepository.find({
       where: { heroId },
@@ -83,54 +90,59 @@ export class AiAnalysisService {
    * pro-match sample this patch, roles come back empty and Ollama isn't called at all.
    */
   private async runAnalysis(heroId: number, patch: PatchSnapshot): Promise<RoleAnalysis> {
-    const hero = await this.heroRepository.findOneBy({ id: heroId });
-    if (!hero) {
-      throw new NotFoundException(`Hero ${heroId} not found — try POST /heroes/sync first`);
-    }
+    this.analyzingHeroIds.add(heroId);
+    try {
+      const hero = await this.heroRepository.findOneBy({ id: heroId });
+      if (!hero) {
+        throw new NotFoundException(`Hero ${heroId} not found — try POST /heroes/sync first`);
+      }
 
-    // Ensures this hero has a stats row even if the bulk collection job never ran — without
-    // this, a single-hero re-analyze would silently score 0 pro games and skip straight to "no
-    // data available" in ~1s, which looks identical to broken.
-    await this.matchStatsCollectorService.collectForHeroNow(heroId, patch);
+      // Ensures this hero has a stats row even if the bulk collection job never ran — without
+      // this, a single-hero re-analyze would silently score 0 pro games and skip straight to "no
+      // data available" in ~1s, which looks identical to broken.
+      await this.matchStatsCollectorService.collectForHeroNow(heroId, patch);
 
-    const roles = await this.roleScoringService.computeRoles(heroId, patch.version);
+      const roles = await this.roleScoringService.computeRoles(heroId, patch.version);
 
-    let summary: string;
-    if (roles.length === 0) {
-      summary = NO_DATA_SUMMARY;
-    } else {
-      const [heroChange, previous, laneStats] = await Promise.all([
-        this.patchesService.getHeroChange(heroId, patch),
-        this.findPreviousAnalysis(heroId, patch),
-        this.matchStatsService.getLaneStats(heroId, patch.version),
-      ]);
+      let summary: string;
+      if (roles.length === 0) {
+        summary = NO_DATA_SUMMARY;
+      } else {
+        const [heroChange, previous, laneStats] = await Promise.all([
+          this.patchesService.getHeroChange(heroId, patch),
+          this.findPreviousAnalysis(heroId, patch),
+          this.matchStatsService.getLaneStats(heroId, patch.version),
+        ]);
 
-      const { system, user } = buildSummaryPrompt({
-        hero,
-        patch,
-        heroChange,
-        roles,
-        laneStats,
-        previous,
+        const { system, user } = buildSummaryPrompt({
+          hero,
+          patch,
+          heroChange,
+          roles,
+          laneStats,
+          previous,
+        });
+        summary = await this.ollamaClient.getSummary(system, user);
+      }
+
+      const existing = await this.analysisRepository.findOneBy({
+        heroId,
+        patchVersion: patch.version,
       });
-      summary = await this.ollamaClient.getSummary(system, user);
+      const entity =
+        existing ??
+        this.analysisRepository.create({ heroId, patchId: patch.id, patchVersion: patch.version });
+
+      entity.roles = roles;
+      entity.summary = summary;
+      entity.rawModelResponse = { roles, summary };
+      entity.analyzedAt = new Date();
+
+      const saved = await this.analysisRepository.save(entity);
+      return this.toDto(saved);
+    } finally {
+      this.analyzingHeroIds.delete(heroId);
     }
-
-    const existing = await this.analysisRepository.findOneBy({
-      heroId,
-      patchVersion: patch.version,
-    });
-    const entity =
-      existing ??
-      this.analysisRepository.create({ heroId, patchId: patch.id, patchVersion: patch.version });
-
-    entity.roles = roles;
-    entity.summary = summary;
-    entity.rawModelResponse = { roles, summary };
-    entity.analyzedAt = new Date();
-
-    const saved = await this.analysisRepository.save(entity);
-    return this.toDto(saved);
   }
 
   private async carryForwardIfUnchanged(

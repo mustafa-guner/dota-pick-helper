@@ -61,10 +61,10 @@ function adminRequest<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const adminApi = {
-  login: (password: string) =>
+  login: (username: string, password: string) =>
     request<{ token: string }>('/admin/login', {
       method: 'POST',
-      body: JSON.stringify({ password }),
+      body: JSON.stringify({ username, password }),
     }),
   getMetrics: () => adminRequest<AdminMetrics>('/admin/metrics'),
   listHeroes: () => adminRequest<AdminHeroSummary[]>('/admin/heroes'),
@@ -73,5 +73,7 @@ export const adminApi = {
     adminRequest<RoleAnalysis>(`/admin/heroes/${id}/analyze`, { method: 'POST' }),
   triggerBulkAnalysis: () =>
     adminRequest<BulkAnalysisStatus>('/admin/analyze-all', { method: 'POST' }),
+  triggerFullReanalysis: () =>
+    adminRequest<BulkAnalysisStatus>('/admin/reanalyze-all', { method: 'POST' }),
   getBulkAnalysisStatus: () => adminRequest<BulkAnalysisStatus>('/admin/analyze-all/status'),
 };

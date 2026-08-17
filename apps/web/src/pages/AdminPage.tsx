@@ -15,22 +15,25 @@ const PHASE_LABELS: Record<string, string> = {
 
 export default function AdminPage() {
   const [authed, setAuthed] = useState(() => !!getAdminToken());
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const loginMutation = useMutation({
-    mutationFn: (password: string) => adminApi.login(password),
+    mutationFn: ({ username, password }: { username: string; password: string }) =>
+      adminApi.login(username, password),
     onSuccess: (data) => {
       setAdminToken(data.token);
       setAuthed(true);
       setLoginError(null);
+      setUsername('');
       setPassword('');
     },
     onError: (error) => {
       setLoginError(
         error instanceof ApiError && error.status === 401
-          ? 'Wrong password.'
+          ? 'Wrong username or password.'
           : 'Login failed — is the API reachable?',
       );
     },
@@ -40,13 +43,22 @@ export default function AdminPage() {
     queryKey: ['admin', 'metrics'],
     queryFn: adminApi.getMetrics,
     enabled: authed,
-    refetchInterval: (query) => (query.state.data?.bulkAnalysis.running ? 5000 : 15000),
+    refetchInterval: (query) =>
+      query.state.data?.bulkAnalysis.running || query.state.data?.analyzingHeroIds.length
+        ? 5000
+        : 15000,
   });
 
   const heroesQuery = useQuery({
     queryKey: ['admin', 'heroes'],
     queryFn: adminApi.listHeroes,
     enabled: authed,
+    // Keeps the table in sync with analyses finishing server-side, including ones started
+    // before a page refresh (whose local mutation onSuccess never fires here).
+    refetchInterval: () =>
+      metricsQuery.data?.bulkAnalysis.running || metricsQuery.data?.analyzingHeroIds.length
+        ? 5000
+        : false,
   });
 
   // Bounce back to the login form if the stored token was rejected (expired/invalid).
@@ -72,6 +84,13 @@ export default function AdminPage() {
     },
   });
 
+  const reanalyzeAllMutation = useMutation({
+    mutationFn: adminApi.triggerFullReanalysis,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'metrics'] });
+    },
+  });
+
   const [notice, setNotice] = useState<string | null>(null);
 
   const analyzeMutation = useMutation({
@@ -91,7 +110,7 @@ export default function AdminPage() {
   if (!authed) {
     const handleSubmit = (e: FormEvent) => {
       e.preventDefault();
-      loginMutation.mutate(password);
+      loginMutation.mutate({ username, password });
     };
 
     return (
@@ -99,16 +118,25 @@ export default function AdminPage() {
         <h1 className="text-xl font-bold text-gold">Admin Login</h1>
         <form onSubmit={handleSubmit} className="mt-6 space-y-3">
           <input
+            type="text"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="Username"
+            autoFocus
+            autoComplete="username"
+            className="w-full rounded-md border border-dota-border bg-dota-panel-alt px-3 py-2 text-sm text-white outline-none focus:border-gold/60"
+          />
+          <input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Password"
-            autoFocus
+            autoComplete="current-password"
             className="w-full rounded-md border border-dota-border bg-dota-panel-alt px-3 py-2 text-sm text-white outline-none focus:border-gold/60"
           />
           <button
             type="submit"
-            disabled={loginMutation.isPending || !password}
+            disabled={loginMutation.isPending || !username || !password}
             className="w-full rounded-md border border-dota-border px-3 py-2 text-sm text-gray-300 hover:border-gold/60 hover:text-gold disabled:opacity-50"
           >
             {loginMutation.isPending ? 'Logging in…' : 'Log in'}
@@ -179,6 +207,21 @@ export default function AdminPage() {
         >
           {bulk?.running ? 'Working…' : 'Analyze pending heroes'}
         </button>
+        <button
+          onClick={() => {
+            if (
+              window.confirm(
+                'Re-analyze EVERY hero from scratch, ignoring existing analyses? With the current model this can take many hours of continuous Ollama inference. Proceed?',
+              )
+            ) {
+              reanalyzeAllMutation.mutate();
+            }
+          }}
+          disabled={reanalyzeAllMutation.isPending || bulk?.running || analyzeMutation.isPending}
+          className="rounded-md border border-dota-border px-3 py-1.5 text-xs text-gray-300 hover:border-gold/60 hover:text-gold disabled:opacity-50"
+        >
+          {bulk?.running ? 'Working…' : 'Re-analyze ALL heroes'}
+        </button>
       </div>
 
       {bulk?.running && (
@@ -222,8 +265,12 @@ export default function AdminPage() {
           </thead>
           <tbody>
             {heroesQuery.data?.map((hero) => {
+              // Combines local mutation state (instant feedback on click) with server-confirmed
+              // state (metrics.analyzingHeroIds) so the indicator survives a page refresh —
+              // local-only state is lost on reload even though the analysis keeps running.
               const isThisRowAnalyzing =
-                analyzeMutation.isPending && analyzeMutation.variables === hero.id;
+                (analyzeMutation.isPending && analyzeMutation.variables === hero.id) ||
+                Boolean(metrics?.analyzingHeroIds.includes(hero.id));
               return (
                 <tr key={hero.id} className="border-t border-dota-border">
                   <td className="flex items-center gap-2 px-3 py-2">

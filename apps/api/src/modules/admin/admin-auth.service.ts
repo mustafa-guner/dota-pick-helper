@@ -1,24 +1,48 @@
 import * as crypto from 'crypto';
-import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import * as bcrypt from 'bcryptjs';
+import { HttpException, HttpStatus, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { AdminUser } from './entities/admin-user.entity';
 
 const TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const MAX_LOGIN_ATTEMPTS = 10;
 const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const BCRYPT_ROUNDS = 12;
 
 interface TokenPayload {
   exp: number;
 }
 
 @Injectable()
-export class AdminAuthService {
+export class AdminAuthService implements OnApplicationBootstrap {
+  private readonly logger = new Logger(AdminAuthService.name);
   private readonly attempts = new Map<string, { count: number; resetAt: number }>();
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    @InjectRepository(AdminUser) private readonly adminUserRepository: Repository<AdminUser>,
+  ) {}
+
+  /** Bootstraps the first admin user from ADMIN_USERNAME/ADMIN_PASSWORD if admin_users is empty
+   * — same pattern tools like Grafana use. Only ever fires once; after that, users are managed
+   * directly in the database and these env vars are no longer read. */
+  async onApplicationBootstrap(): Promise<void> {
+    const existingCount = await this.adminUserRepository.count();
+    if (existingCount > 0) return;
+
+    const username = this.configService.getOrThrow<string>('adminUsername');
+    const password = this.configService.getOrThrow<string>('adminPassword');
+    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+
+    await this.adminUserRepository.save(this.adminUserRepository.create({ username, passwordHash }));
+    this.logger.log(`Seeded initial admin user "${username}"`);
+  }
 
   /** Throws 429 if the caller IP has exceeded the login attempt budget. Returns a signed
-   * session token on success, or null on a wrong password. */
-  login(password: string, ip: string): string | null {
+   * session token on success, or null on a wrong username/password. */
+  async login(username: string, password: string, ip: string): Promise<string | null> {
     if (this.isRateLimited(ip)) {
       throw new HttpException(
         'Too many login attempts — try again later',
@@ -26,11 +50,10 @@ export class AdminAuthService {
       );
     }
 
-    const expected = Buffer.from(this.configService.getOrThrow<string>('adminPassword'), 'utf8');
-    const provided = Buffer.from(password ?? '', 'utf8');
-    const isValid =
-      provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
+    const user = await this.adminUserRepository.findOneBy({ username });
+    if (!user) return null;
 
+    const isValid = await bcrypt.compare(password, user.passwordHash);
     return isValid ? this.issueToken() : null;
   }
 

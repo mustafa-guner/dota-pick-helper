@@ -60,6 +60,38 @@ export class BulkAnalysisService {
       return this.getStatus();
     }
 
+    this.startRun(pendingIds, patch, false);
+    return this.getStatus();
+  }
+
+  /**
+   * Force re-analyzes EVERY hero regardless of whether it already has an analysis for this
+   * patch — bypasses both the cache-hit and carry-forward shortcuts. With llama3.1:8b this can
+   * take many hours (~127 heroes × several minutes of Ollama each) — only ever triggered
+   * explicitly from the admin panel, never scheduled.
+   */
+  async triggerFullReanalysis(): Promise<BulkAnalysisStatus> {
+    if (this.status.running) return this.getStatus();
+
+    const patch = await this.patchesService.getOrRefreshLatest();
+    const heroIds = (await this.heroRepository.find({ select: ['id'] })).map((hero) => hero.id);
+
+    if (heroIds.length === 0) {
+      this.status = {
+        running: false,
+        phase: 'idle',
+        total: 0,
+        completed: 0,
+        patchVersion: patch.version,
+      };
+      return this.getStatus();
+    }
+
+    this.startRun(heroIds, patch, true);
+    return this.getStatus();
+  }
+
+  private startRun(heroIds: number[], patch: PatchSnapshot, force: boolean): void {
     this.status = {
       running: true,
       phase: 'collecting-stats',
@@ -67,8 +99,7 @@ export class BulkAnalysisService {
       completed: 0,
       patchVersion: patch.version,
     };
-    void this.runSequentially(pendingIds, patch);
-    return this.getStatus();
+    void this.runSequentially(heroIds, patch, force);
   }
 
   private async findPendingHeroIds(patchVersion: string): Promise<number[]> {
@@ -86,7 +117,11 @@ export class BulkAnalysisService {
     return rows.map((row) => row.id);
   }
 
-  private async runSequentially(heroIds: number[], patch: PatchSnapshot): Promise<void> {
+  private async runSequentially(
+    heroIds: number[],
+    patch: PatchSnapshot,
+    force: boolean,
+  ): Promise<void> {
     try {
       await this.matchStatsCollectorService.collectForPatch(patch, (completed, total) => {
         this.status = { ...this.status, phase: 'collecting-stats', completed, total };
@@ -104,7 +139,11 @@ export class BulkAnalysisService {
 
     for (const heroId of heroIds) {
       try {
-        await this.aiAnalysisService.getOrCreateAnalysis(heroId, patch);
+        if (force) {
+          await this.aiAnalysisService.forceAnalyze(heroId);
+        } else {
+          await this.aiAnalysisService.getOrCreateAnalysis(heroId, patch);
+        }
       } catch (error) {
         this.logger.warn(`Bulk analysis failed for hero ${heroId}: ${(error as Error).message}`);
       }

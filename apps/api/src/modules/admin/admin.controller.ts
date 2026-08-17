@@ -38,10 +38,14 @@ export class AdminController {
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  login(@Body() body: LoginDto, @Req() request: Request): { token: string } {
-    const token = this.adminAuthService.login(body.password, request.ip ?? 'unknown');
+  async login(@Body() body: LoginDto, @Req() request: Request): Promise<{ token: string }> {
+    const token = await this.adminAuthService.login(
+      body.username,
+      body.password,
+      request.ip ?? 'unknown',
+    );
     if (!token) {
-      throw new UnauthorizedException('Invalid password');
+      throw new UnauthorizedException('Invalid username or password');
     }
     return { token };
   }
@@ -74,6 +78,12 @@ export class AdminController {
   @UseGuards(AdminAuthGuard)
   triggerBulkAnalysis(): Promise<BulkAnalysisStatus> {
     return this.bulkAnalysisService.checkAndQueue();
+  }
+
+  @Post('reanalyze-all')
+  @UseGuards(AdminAuthGuard)
+  triggerFullReanalysis(): Promise<BulkAnalysisStatus> {
+    return this.bulkAnalysisService.triggerFullReanalysis();
   }
 
   @Get('analyze-all/status')

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Hero } from '../heroes/entities/hero.entity';
 import { HeroRoleAnalysis } from '../ai-analysis/entities/hero-role-analysis.entity';
+import { AdminUser } from './entities/admin-user.entity';
 import { HeroesModule } from '../heroes/heroes.module';
 import { AiAnalysisModule } from '../ai-analysis/ai-analysis.module';
 import { PatchesModule } from '../patches/patches.module';
@@ -13,7 +14,7 @@ import { AdminAuthGuard } from './admin-auth.guard';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Hero, HeroRoleAnalysis]),
+    TypeOrmModule.forFeature([Hero, HeroRoleAnalysis, AdminUser]),
     HeroesModule,
     AiAnalysisModule,
     PatchesModule,

@@ -7,6 +7,7 @@ import { Hero } from '../heroes/entities/hero.entity';
 import { HeroRoleAnalysis } from '../ai-analysis/entities/hero-role-analysis.entity';
 import { PatchesService } from '../patches/patches.service';
 import { BulkAnalysisService } from '../ai-analysis/bulk-analysis.service';
+import { AiAnalysisService } from '../ai-analysis/ai-analysis.service';
 import { MatchStatsCollectorService } from '../match-stats/match-stats-collector.service';
 
 interface HeroWithAnalysisRow {
@@ -27,6 +28,7 @@ export class AdminService {
     private readonly analysisRepository: Repository<HeroRoleAnalysis>,
     private readonly patchesService: PatchesService,
     private readonly bulkAnalysisService: BulkAnalysisService,
+    private readonly aiAnalysisService: AiAnalysisService,
     private readonly matchStatsCollectorService: MatchStatsCollectorService,
     private readonly configService: ConfigService,
   ) {}
@@ -48,6 +50,7 @@ export class AdminService {
       bulkAnalysis: this.bulkAnalysisService.getStatus(),
       ollamaModel: this.configService.get<string>('ollamaModel') ?? 'llama3.1',
       matchStatsCollectedAt: this.matchStatsCollectorService.getStatus().lastCollectedAt,
+      analyzingHeroIds: this.aiAnalysisService.getAnalyzingHeroIds(),
     };
   }
 

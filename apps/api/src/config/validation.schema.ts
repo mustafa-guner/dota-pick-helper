@@ -9,6 +9,9 @@ export const validationSchema = Joi.object({
   DOTA2_DATAFEED_BASE_URL: Joi.string().default('https://www.dota2.com/datafeed'),
   PATCH_REFRESH_CRON: Joi.string().default('0 */6 * * *'),
   CORS_ORIGIN: Joi.string().default('http://localhost:5173'),
+  // Used only to bootstrap the first row in admin_users on an empty table — see
+  // admin-auth.service.ts's seedInitialUser(). Not read at login time after that.
+  ADMIN_USERNAME: Joi.string().required(),
   ADMIN_PASSWORD: Joi.string().required(),
   ADMIN_TOKEN_SECRET: Joi.string().required(),
 });

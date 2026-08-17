@@ -7,6 +7,7 @@ export default () => ({
   dota2DatafeedBaseUrl: process.env.DOTA2_DATAFEED_BASE_URL ?? 'https://www.dota2.com/datafeed',
   patchRefreshCron: process.env.PATCH_REFRESH_CRON ?? '0 */6 * * *',
   corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
+  adminUsername: process.env.ADMIN_USERNAME,
   adminPassword: process.env.ADMIN_PASSWORD,
   adminTokenSecret: process.env.ADMIN_TOKEN_SECRET,
 });

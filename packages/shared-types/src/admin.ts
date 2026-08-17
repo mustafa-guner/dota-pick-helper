@@ -10,6 +10,7 @@ export interface AdminMetrics {
   bulkAnalysis: BulkAnalysisStatus;
   ollamaModel: string;
   matchStatsCollectedAt: string | null;
+  analyzingHeroIds: number[];
 }
 
 export interface AdminHeroSummary {
