@@ -16,7 +16,7 @@ export type {
   HeroPatchChange,
 } from './patch';
 export type { RoleRecommendation, RoleAnalysis, RoleHistoryEntry } from './role-analysis';
-export type { BulkAnalysisStatus } from './bulk-analysis';
+export type { BulkAnalysisStatus, BulkAnalysisPhase } from './bulk-analysis';
 export type { AdminMetrics, AdminHeroSummary } from './admin';
 
 // A const object (not a TS `enum`) — enums compile to an IIFE-wrapped assignment that

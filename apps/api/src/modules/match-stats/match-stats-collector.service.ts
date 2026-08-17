@@ -46,14 +46,18 @@ export class MatchStatsCollectorService {
     return { ...this.status };
   }
 
-  async collectForPatch(patch: PatchSnapshot): Promise<void> {
+  async collectForPatch(
+    patch: PatchSnapshot,
+    onProgress?: (completed: number, total: number) => void,
+  ): Promise<void> {
     const heroes = await this.heroRepository.find({ select: ['id'] });
     const windowEnd = Math.floor(Date.now() / 1000);
     // Always look back at least MIN_LOOKBACK_DAYS so a brand-new patch still has some sample,
     // even if it's partly pre-patch pro data — a documented v1 approximation.
     const since = Math.min(patch.patchTimestamp, windowEnd - MIN_LOOKBACK_DAYS * 86400);
 
-    for (const hero of heroes) {
+    for (let i = 0; i < heroes.length; i++) {
+      const hero = heroes[i];
       try {
         const rows = await this.collectForHero(hero.id, since);
         await this.saveRows(hero.id, patch, rows, since, windowEnd);
@@ -62,6 +66,7 @@ export class MatchStatsCollectorService {
           `Match stats collection failed for hero ${hero.id}: ${(error as Error).message}`,
         );
       }
+      onProgress?.(i + 1, heroes.length);
       await new Promise((resolve) => setTimeout(resolve, DELAY_BETWEEN_HEROES_MS));
     }
 

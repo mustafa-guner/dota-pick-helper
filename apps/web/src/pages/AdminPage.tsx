@@ -7,6 +7,12 @@ function formatDate(iso: string | null): string {
   return iso ? new Date(iso).toLocaleString() : '—';
 }
 
+const PHASE_LABELS: Record<string, string> = {
+  idle: 'Idle',
+  'collecting-stats': 'Collecting match stats',
+  'analyzing-heroes': 'Analyzing heroes',
+};
+
 export default function AdminPage() {
   const [authed, setAuthed] = useState(() => !!getAdminToken());
   const [password, setPassword] = useState('');
@@ -131,7 +137,7 @@ export default function AdminPage() {
             ['Total heroes', metrics.totalHeroes],
             ['Analyzed', metrics.analyzedForCurrentPatch],
             ['Pending', metrics.pendingForCurrentPatch],
-            ['Bulk status', bulk?.running ? `${bulk.completed}/${bulk.total}` : 'Idle'],
+            ['Bulk status', bulk ? PHASE_LABELS[bulk.phase] : 'Idle'],
             [
               'Stats collected',
               metrics.matchStatsCollectedAt
@@ -150,7 +156,7 @@ export default function AdminPage() {
         </div>
       )}
 
-      <div className="mb-8 flex flex-wrap gap-3">
+      <div className="mb-3 flex flex-wrap gap-3">
         <button
           onClick={() => syncMutation.mutate()}
           disabled={syncMutation.isPending}
@@ -163,9 +169,28 @@ export default function AdminPage() {
           disabled={bulkMutation.isPending || bulk?.running}
           className="rounded-md border border-dota-border px-3 py-1.5 text-xs text-gray-300 hover:border-gold/60 hover:text-gold disabled:opacity-50"
         >
-          {bulk?.running ? `Analyzing ${bulk.completed}/${bulk.total}…` : 'Analyze pending heroes'}
+          {bulk?.running ? 'Working…' : 'Analyze pending heroes'}
         </button>
       </div>
+
+      {bulk?.running && (
+        <div className="mb-8">
+          <div className="mb-1 flex items-center justify-between text-xs text-gray-400">
+            <span>{PHASE_LABELS[bulk.phase]}…</span>
+            <span>
+              {bulk.total > 0 ? `${bulk.completed}/${bulk.total}` : 'Starting…'}
+            </span>
+          </div>
+          <div className="h-2 w-full overflow-hidden rounded-full bg-dota-panel-alt">
+            <div
+              className="h-full rounded-full bg-gold transition-all duration-500"
+              style={{
+                width: bulk.total > 0 ? `${Math.round((bulk.completed / bulk.total) * 100)}%` : '4%',
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       <div className="overflow-x-auto rounded-lg border border-dota-border">
         <table className="w-full text-left text-sm">

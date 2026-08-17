@@ -15,6 +15,7 @@ export class BulkAnalysisService {
 
   private status: BulkAnalysisStatus = {
     running: false,
+    phase: 'idle',
     total: 0,
     completed: 0,
     patchVersion: null,
@@ -49,13 +50,20 @@ export class BulkAnalysisService {
     const pendingIds = await this.findPendingHeroIds(patch.version);
 
     if (pendingIds.length === 0) {
-      this.status = { running: false, total: 0, completed: 0, patchVersion: patch.version };
+      this.status = {
+        running: false,
+        phase: 'idle',
+        total: 0,
+        completed: 0,
+        patchVersion: patch.version,
+      };
       return this.getStatus();
     }
 
     this.status = {
       running: true,
-      total: pendingIds.length,
+      phase: 'collecting-stats',
+      total: 0,
       completed: 0,
       patchVersion: patch.version,
     };
@@ -80,10 +88,19 @@ export class BulkAnalysisService {
 
   private async runSequentially(heroIds: number[], patch: PatchSnapshot): Promise<void> {
     try {
-      await this.matchStatsCollectorService.collectForPatch(patch);
+      await this.matchStatsCollectorService.collectForPatch(patch, (completed, total) => {
+        this.status = { ...this.status, phase: 'collecting-stats', completed, total };
+      });
     } catch (error) {
       this.logger.warn(`Match stats collection failed, continuing with stale stats: ${(error as Error).message}`);
     }
+
+    this.status = {
+      ...this.status,
+      phase: 'analyzing-heroes',
+      total: heroIds.length,
+      completed: 0,
+    };
 
     for (const heroId of heroIds) {
       try {
@@ -97,6 +114,6 @@ export class BulkAnalysisService {
     this.logger.log(
       `Bulk analysis finished for patch ${patch.version}: ${this.status.completed}/${this.status.total} heroes`,
     );
-    this.status.running = false;
+    this.status = { ...this.status, running: false, phase: 'idle' };
   }
 }
