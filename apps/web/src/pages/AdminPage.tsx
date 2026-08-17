@@ -72,17 +72,21 @@ export default function AdminPage() {
     },
   });
 
+  const [notice, setNotice] = useState<string | null>(null);
+
   const analyzeMutation = useMutation({
     mutationFn: (heroId: number) => adminApi.analyzeHero(heroId),
-    onSuccess: () => {
+    onSuccess: (data, heroId) => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'heroes'] });
       queryClient.invalidateQueries({ queryKey: ['admin', 'metrics'] });
+      const heroName = heroesQuery.data?.find((h) => h.id === heroId)?.localizedName ?? 'This hero';
+      setNotice(
+        data.roles.length === 0
+          ? `${heroName}: stats were refreshed, but there are still fewer than 5 professional games recorded for it this patch — too little data for a role call yet.`
+          : null,
+      );
     },
   });
-
-  const analyzingHeroName = analyzeMutation.isPending
-    ? heroesQuery.data?.find((h) => h.id === analyzeMutation.variables)?.localizedName
-    : undefined;
 
   if (!authed) {
     const handleSubmit = (e: FormEvent) => {
@@ -196,14 +200,12 @@ export default function AdminPage() {
         </div>
       )}
 
-      {analyzeMutation.isPending && (
-        <div className="mb-8">
-          <div className="mb-1 text-xs text-gray-400">
-            Analyzing {analyzingHeroName ?? 'hero'}… this can take several minutes.
-          </div>
-          <div className="h-2 w-full overflow-hidden rounded-full bg-dota-panel-alt">
-            <div className="h-full w-1/3 animate-pulse rounded-full bg-gold" />
-          </div>
+      {notice && (
+        <div className="mb-6 flex items-start justify-between gap-3 rounded-md border border-dota-border bg-dota-panel-alt px-3 py-2 text-xs text-gray-300">
+          <span>{notice}</span>
+          <button onClick={() => setNotice(null)} className="shrink-0 text-gray-500 hover:text-gold">
+            Dismiss
+          </button>
         </div>
       )}
 
@@ -239,13 +241,22 @@ export default function AdminPage() {
                   <td className="px-3 py-2 text-gray-500">{hero.patchVersion ?? '—'}</td>
                   <td className="px-3 py-2 text-gray-500">{formatDate(hero.analyzedAt)}</td>
                   <td className="px-3 py-2 text-right">
-                    <button
-                      onClick={() => analyzeMutation.mutate(hero.id)}
-                      disabled={analyzeMutation.isPending || bulk?.running}
-                      className="rounded-md border border-dota-border px-2.5 py-1 text-xs text-gray-300 hover:border-gold/60 hover:text-gold disabled:opacity-50"
-                    >
-                      {isThisRowAnalyzing ? 'Analyzing…' : 'Re-analyze'}
-                    </button>
+                    {isThisRowAnalyzing ? (
+                      <div className="ml-auto w-32">
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-dota-panel-alt">
+                          <div className="h-full w-1/3 animate-pulse rounded-full bg-gold" />
+                        </div>
+                        <div className="mt-1 text-[10px] text-gray-500">Analyzing…</div>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => analyzeMutation.mutate(hero.id)}
+                        disabled={analyzeMutation.isPending || bulk?.running}
+                        className="rounded-md border border-dota-border px-2.5 py-1 text-xs text-gray-300 hover:border-gold/60 hover:text-gold disabled:opacity-50"
+                      >
+                        Re-analyze
+                      </button>
+                    )}
                   </td>
                 </tr>
               );

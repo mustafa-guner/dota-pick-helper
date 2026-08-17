@@ -51,21 +51,9 @@ export class MatchStatsCollectorService {
     onProgress?: (completed: number, total: number) => void,
   ): Promise<void> {
     const heroes = await this.heroRepository.find({ select: ['id'] });
-    const windowEnd = Math.floor(Date.now() / 1000);
-    // Always look back at least MIN_LOOKBACK_DAYS so a brand-new patch still has some sample,
-    // even if it's partly pre-patch pro data — a documented v1 approximation.
-    const since = Math.min(patch.patchTimestamp, windowEnd - MIN_LOOKBACK_DAYS * 86400);
 
     for (let i = 0; i < heroes.length; i++) {
-      const hero = heroes[i];
-      try {
-        const rows = await this.collectForHero(hero.id, since);
-        await this.saveRows(hero.id, patch, rows, since, windowEnd);
-      } catch (error) {
-        this.logger.warn(
-          `Match stats collection failed for hero ${hero.id}: ${(error as Error).message}`,
-        );
-      }
+      await this.collectForOneHero(heroes[i].id, patch);
       onProgress?.(i + 1, heroes.length);
       await new Promise((resolve) => setTimeout(resolve, DELAY_BETWEEN_HEROES_MS));
     }
@@ -74,7 +62,33 @@ export class MatchStatsCollectorService {
     this.logger.log(`Match stats collection finished for patch ${patch.version}`);
   }
 
-  private async collectForHero(heroId: number, since: number): Promise<LaneStatsRow[]> {
+  /**
+   * Collects fresh stats for a single hero right now (~1s). Used before an on-demand single-hero
+   * analysis so it never depends on the bulk job having run first — without this, a hero with no
+   * HeroLaneStats row yet would score 0 pro games and skip straight to "no data available"
+   * looking instant/broken, even though real data might exist and just hasn't been pulled yet.
+   */
+  async collectForHeroNow(heroId: number, patch: PatchSnapshot): Promise<void> {
+    await this.collectForOneHero(heroId, patch);
+  }
+
+  private async collectForOneHero(heroId: number, patch: PatchSnapshot): Promise<void> {
+    const windowEnd = Math.floor(Date.now() / 1000);
+    // Always look back at least MIN_LOOKBACK_DAYS so a brand-new patch still has some sample,
+    // even if it's partly pre-patch pro data — a documented v1 approximation.
+    const since = Math.min(patch.patchTimestamp, windowEnd - MIN_LOOKBACK_DAYS * 86400);
+
+    try {
+      const rows = await this.queryHeroStats(heroId, since);
+      await this.saveRows(heroId, patch, rows, since, windowEnd);
+    } catch (error) {
+      this.logger.warn(
+        `Match stats collection failed for hero ${heroId}: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  private async queryHeroStats(heroId: number, since: number): Promise<LaneStatsRow[]> {
     const sql = `
       WITH ranked AS (
         SELECT

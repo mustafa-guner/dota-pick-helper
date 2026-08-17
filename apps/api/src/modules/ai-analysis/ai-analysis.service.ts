@@ -6,6 +6,7 @@ import { Hero } from '../heroes/entities/hero.entity';
 import { PatchSnapshot } from '../patches/entities/patch-snapshot.entity';
 import { PatchesService } from '../patches/patches.service';
 import { MatchStatsService } from '../match-stats/match-stats.service';
+import { MatchStatsCollectorService } from '../match-stats/match-stats-collector.service';
 import { OllamaClientService } from './ollama-client.service';
 import { RoleScoringService } from './role-scoring.service';
 import { HeroRoleAnalysis } from './entities/hero-role-analysis.entity';
@@ -23,6 +24,7 @@ export class AiAnalysisService {
     private readonly analysisRepository: Repository<HeroRoleAnalysis>,
     private readonly patchesService: PatchesService,
     private readonly matchStatsService: MatchStatsService,
+    private readonly matchStatsCollectorService: MatchStatsCollectorService,
     private readonly roleScoringService: RoleScoringService,
     private readonly ollamaClient: OllamaClientService,
   ) {}
@@ -85,6 +87,11 @@ export class AiAnalysisService {
     if (!hero) {
       throw new NotFoundException(`Hero ${heroId} not found — try POST /heroes/sync first`);
     }
+
+    // Ensures this hero has a stats row even if the bulk collection job never ran — without
+    // this, a single-hero re-analyze would silently score 0 pro games and skip straight to "no
+    // data available" in ~1s, which looks identical to broken.
+    await this.matchStatsCollectorService.collectForHeroNow(heroId, patch);
 
     const roles = await this.roleScoringService.computeRoles(heroId, patch.version);
 
