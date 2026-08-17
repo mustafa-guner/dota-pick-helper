@@ -80,6 +80,10 @@ export default function AdminPage() {
     },
   });
 
+  const analyzingHeroName = analyzeMutation.isPending
+    ? heroesQuery.data?.find((h) => h.id === analyzeMutation.variables)?.localizedName
+    : undefined;
+
   if (!authed) {
     const handleSubmit = (e: FormEvent) => {
       e.preventDefault();
@@ -166,7 +170,7 @@ export default function AdminPage() {
         </button>
         <button
           onClick={() => bulkMutation.mutate()}
-          disabled={bulkMutation.isPending || bulk?.running}
+          disabled={bulkMutation.isPending || bulk?.running || analyzeMutation.isPending}
           className="rounded-md border border-dota-border px-3 py-1.5 text-xs text-gray-300 hover:border-gold/60 hover:text-gold disabled:opacity-50"
         >
           {bulk?.running ? 'Working…' : 'Analyze pending heroes'}
@@ -188,6 +192,17 @@ export default function AdminPage() {
                 width: bulk.total > 0 ? `${Math.round((bulk.completed / bulk.total) * 100)}%` : '4%',
               }}
             />
+          </div>
+        </div>
+      )}
+
+      {analyzeMutation.isPending && (
+        <div className="mb-8">
+          <div className="mb-1 text-xs text-gray-400">
+            Analyzing {analyzingHeroName ?? 'hero'}… this can take several minutes.
+          </div>
+          <div className="h-2 w-full overflow-hidden rounded-full bg-dota-panel-alt">
+            <div className="h-full w-1/3 animate-pulse rounded-full bg-gold" />
           </div>
         </div>
       )}
@@ -226,7 +241,7 @@ export default function AdminPage() {
                   <td className="px-3 py-2 text-right">
                     <button
                       onClick={() => analyzeMutation.mutate(hero.id)}
-                      disabled={analyzeMutation.isPending}
+                      disabled={analyzeMutation.isPending || bulk?.running}
                       className="rounded-md border border-dota-border px-2.5 py-1 text-xs text-gray-300 hover:border-gold/60 hover:text-gold disabled:opacity-50"
                     >
                       {isThisRowAnalyzing ? 'Analyzing…' : 'Re-analyze'}
