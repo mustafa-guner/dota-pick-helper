@@ -7,7 +7,11 @@ import { PatchSnapshot } from '../patches/entities/patch-snapshot.entity';
 import { HeroLaneStats } from './entities/hero-lane-stats.entity';
 import { OpenDotaExplorerService } from './opendota-explorer.service';
 
-const MIN_LOOKBACK_DAYS = 21;
+// Verified live: over 21 days, a moderately-picked hero (Abaddon) had only 1 parsed pro game vs.
+// 59 over 90 days — 21 was too narrow to reliably clear RoleScoringService's 5-game floor for
+// anything but heavily-contested heroes. 45 trades some "current patch only" freshness for
+// enough sample size to actually produce a role call for most of the hero pool.
+const MIN_LOOKBACK_DAYS = 45;
 const DELAY_BETWEEN_HEROES_MS = 300;
 
 interface LaneStatsRow {
