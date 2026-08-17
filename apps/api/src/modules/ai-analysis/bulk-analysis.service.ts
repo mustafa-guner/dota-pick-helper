@@ -5,6 +5,7 @@ import { BulkAnalysisStatus } from '@dota-pick-helper/shared-types';
 import { Hero } from '../heroes/entities/hero.entity';
 import { PatchSnapshot } from '../patches/entities/patch-snapshot.entity';
 import { PatchesService } from '../patches/patches.service';
+import { MatchStatsCollectorService } from '../match-stats/match-stats-collector.service';
 import { AiAnalysisService } from './ai-analysis.service';
 import { HeroRoleAnalysis } from './entities/hero-role-analysis.entity';
 
@@ -22,6 +23,7 @@ export class BulkAnalysisService {
   constructor(
     @InjectRepository(Hero) private readonly heroRepository: Repository<Hero>,
     private readonly patchesService: PatchesService,
+    private readonly matchStatsCollectorService: MatchStatsCollectorService,
     private readonly aiAnalysisService: AiAnalysisService,
   ) {}
 
@@ -77,6 +79,12 @@ export class BulkAnalysisService {
   }
 
   private async runSequentially(heroIds: number[], patch: PatchSnapshot): Promise<void> {
+    try {
+      await this.matchStatsCollectorService.collectForPatch(patch);
+    } catch (error) {
+      this.logger.warn(`Match stats collection failed, continuing with stale stats: ${(error as Error).message}`);
+    }
+
     for (const heroId of heroIds) {
       try {
         await this.aiAnalysisService.getOrCreateAnalysis(heroId, patch);

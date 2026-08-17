@@ -1,32 +1,35 @@
 import { HeroPatchChange, RoleRecommendation } from '@dota-pick-helper/shared-types';
 import { Hero } from '../../heroes/entities/hero.entity';
 import { PatchSnapshot } from '../../patches/entities/patch-snapshot.entity';
+import { HeroLaneStats } from '../../match-stats/entities/hero-lane-stats.entity';
 
-export interface RoleAnalysisPromptInput {
+export interface SummaryPromptInput {
   hero: Hero;
   patch: PatchSnapshot;
   heroChange: HeroPatchChange | null;
+  roles: RoleRecommendation[];
+  laneStats: HeroLaneStats[];
   previous: { patchVersion: string; roles: RoleRecommendation[]; summary: string } | null;
 }
 
-const SYSTEM_PROMPT = `You are a veteran Dota 2 competitive analyst who tracks every patch closely. \
-You help a returning player who has not kept up with recent balance changes figure out which lane \
-role(s) a hero currently fits, based on the hero's kit and the specific balance changes in the \
-current patch. Be concrete and decisive. Ground your reasoning in the actual patch notes given to \
-you and the hero's ability kit — do not invent changes that were not listed. If no changes were \
-listed for this hero this patch, say so explicitly and reason from the hero's kit and its role in \
-the broader current meta instead.`;
+const ROLE_LABELS: Record<string, string> = {
+  SAFELANE: 'Safelane',
+  MID: 'Mid',
+  OFFLANE: 'Offlane',
+  SOFT_SUPPORT: 'Soft Support',
+  HARD_SUPPORT: 'Hard Support',
+};
+
+const SYSTEM_PROMPT = `You are a veteran Dota 2 competitive analyst. You are given a hero's kit, \
+this patch's balance changes, and real professional-match win/pick rate data. The role ranking \
+has ALREADY been decided from that real data — your only job is to write a 2-4 sentence \
+explanation of why those roles make sense, grounded in the specific win rates and patch notes \
+given to you. Do not propose different roles, do not contradict the given ranking, and do not \
+invent balance changes that were not listed. Reference concrete numbers (win rate, sample size) \
+and specific patch notes when relevant.`;
 
 function formatAbilities(hero: Hero): string {
-  return hero.abilities
-    .map((a) => `- ${a.localizedName}: ${a.description}`)
-    .join('\n');
-}
-
-function formatTalents(hero: Hero): string {
-  return hero.talents
-    .map((t) => `- Level ${t.level} (${t.slot}): ${t.description}`)
-    .join('\n');
+  return hero.abilities.map((a) => `- ${a.localizedName}: ${a.description}`).join('\n');
 }
 
 function formatHeroChange(heroChange: HeroPatchChange | null): string {
@@ -46,40 +49,48 @@ function formatHeroChange(heroChange: HeroPatchChange | null): string {
   return lines.join('\n');
 }
 
-function formatPrevious(previous: RoleAnalysisPromptInput['previous']): string {
+function formatRoles(roles: RoleRecommendation[], laneStats: HeroLaneStats[]): string {
+  return [...roles]
+    .sort((a, b) => a.rank - b.rank)
+    .map((r) => {
+      const stats = laneStats.find((s) => s.role === r.role);
+      const label = ROLE_LABELS[r.role] ?? r.role;
+      if (!stats) return `${r.rank}. ${label} (confidence ${r.confidence})`;
+      const winRate = Math.round((stats.wins / stats.games) * 100);
+      return `${r.rank}. ${label} — ${winRate}% win rate over ${stats.games} professional games this patch (confidence ${r.confidence})`;
+    })
+    .join('\n');
+}
+
+function formatPrevious(previous: SummaryPromptInput['previous']): string {
   if (!previous) return 'No prior analysis on record for this hero.';
   const roles = previous.roles
     .sort((a, b) => a.rank - b.rank)
-    .map((r) => r.role)
+    .map((r) => ROLE_LABELS[r.role] ?? r.role)
     .join(', ');
   return `On patch ${previous.patchVersion}, this hero was assessed as: ${roles}. Reasoning was: "${previous.summary}"`;
 }
 
-export function buildRoleAnalysisPrompt(input: RoleAnalysisPromptInput): {
-  system: string;
-  user: string;
-} {
-  const { hero, patch, heroChange, previous } = input;
+export function buildSummaryPrompt(input: SummaryPromptInput): { system: string; user: string } {
+  const { hero, patch, heroChange, roles, laneStats, previous } = input;
 
   const user = `HERO: ${hero.localizedName} (${hero.primaryAttr === 'all' ? 'Universal' : hero.primaryAttr}, ${hero.attackType})
 
-BASE STATS: ${hero.baseStats.baseStr} STR / ${hero.baseStats.baseAgi} AGI / ${hero.baseStats.baseInt} INT (gain ${hero.baseStats.strGain}/${hero.baseStats.agiGain}/${hero.baseStats.intGain} per level), ${hero.baseStats.baseHealth} HP, ${hero.baseStats.baseMana} mana, move speed ${hero.baseStats.moveSpeed}, base damage ${hero.baseStats.baseDamageMin}-${hero.baseStats.baseDamageMax}
-
 ABILITIES:
 ${formatAbilities(hero)}
-
-TALENTS:
-${formatTalents(hero)}
 
 CURRENT PATCH: ${patch.version}
 
 THIS HERO'S CHANGES IN PATCH ${patch.version}:
 ${formatHeroChange(heroChange)}
 
+ALREADY-DECIDED ROLE RANKING (from real professional-match data — explain this, do not change it):
+${formatRoles(roles, laneStats)}
+
 PREVIOUS PATCH ANALYSIS (for continuity — call out if the role has shifted and why):
 ${formatPrevious(previous)}
 
-Based on all of the above, determine the realistic current lane role(s) for ${hero.localizedName} on patch ${patch.version} and submit your analysis via the submit_role_analysis tool.`;
+Write a 2-4 sentence explanation of why ${hero.localizedName} fits the role(s) above on patch ${patch.version}.`;
 
   return { system: SYSTEM_PROMPT, user };
 }

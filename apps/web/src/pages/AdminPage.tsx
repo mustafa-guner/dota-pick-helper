@@ -132,6 +132,12 @@ export default function AdminPage() {
             ['Analyzed', metrics.analyzedForCurrentPatch],
             ['Pending', metrics.pendingForCurrentPatch],
             ['Bulk status', bulk?.running ? `${bulk.completed}/${bulk.total}` : 'Idle'],
+            [
+              'Stats collected',
+              metrics.matchStatsCollectedAt
+                ? new Date(metrics.matchStatsCollectedAt).toLocaleString()
+                : 'Never',
+            ],
           ].map(([label, value]) => (
             <div
               key={label}

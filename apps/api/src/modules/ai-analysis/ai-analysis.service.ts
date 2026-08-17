@@ -5,9 +5,13 @@ import { RoleAnalysis, RoleHistoryEntry } from '@dota-pick-helper/shared-types';
 import { Hero } from '../heroes/entities/hero.entity';
 import { PatchSnapshot } from '../patches/entities/patch-snapshot.entity';
 import { PatchesService } from '../patches/patches.service';
+import { MatchStatsService } from '../match-stats/match-stats.service';
 import { OllamaClientService } from './ollama-client.service';
+import { RoleScoringService } from './role-scoring.service';
 import { HeroRoleAnalysis } from './entities/hero-role-analysis.entity';
-import { buildRoleAnalysisPrompt } from './prompts/role-analysis.prompt';
+import { buildSummaryPrompt } from './prompts/role-analysis.prompt';
+
+const NO_DATA_SUMMARY = 'No professional match data is available yet for this hero this patch.';
 
 @Injectable()
 export class AiAnalysisService {
@@ -18,6 +22,8 @@ export class AiAnalysisService {
     @InjectRepository(HeroRoleAnalysis)
     private readonly analysisRepository: Repository<HeroRoleAnalysis>,
     private readonly patchesService: PatchesService,
+    private readonly matchStatsService: MatchStatsService,
+    private readonly roleScoringService: RoleScoringService,
     private readonly ollamaClient: OllamaClientService,
   ) {}
 
@@ -69,19 +75,39 @@ export class AiAnalysisService {
     }));
   }
 
+  /**
+   * Roles are decided by RoleScoringService from real pro-match data (see role-scoring.service.ts)
+   * — Ollama is only ever asked to explain that ranking in prose, never to invent it. With no
+   * pro-match sample this patch, roles come back empty and Ollama isn't called at all.
+   */
   private async runAnalysis(heroId: number, patch: PatchSnapshot): Promise<RoleAnalysis> {
     const hero = await this.heroRepository.findOneBy({ id: heroId });
     if (!hero) {
       throw new NotFoundException(`Hero ${heroId} not found — try POST /heroes/sync first`);
     }
 
-    const [heroChange, previous] = await Promise.all([
-      this.patchesService.getHeroChange(heroId, patch),
-      this.findPreviousAnalysis(heroId, patch),
-    ]);
+    const roles = await this.roleScoringService.computeRoles(heroId, patch.version);
 
-    const { system, user } = buildRoleAnalysisPrompt({ hero, patch, heroChange, previous });
-    const modelOutput = await this.ollamaClient.getRoleRecommendation(system, user);
+    let summary: string;
+    if (roles.length === 0) {
+      summary = NO_DATA_SUMMARY;
+    } else {
+      const [heroChange, previous, laneStats] = await Promise.all([
+        this.patchesService.getHeroChange(heroId, patch),
+        this.findPreviousAnalysis(heroId, patch),
+        this.matchStatsService.getLaneStats(heroId, patch.version),
+      ]);
+
+      const { system, user } = buildSummaryPrompt({
+        hero,
+        patch,
+        heroChange,
+        roles,
+        laneStats,
+        previous,
+      });
+      summary = await this.ollamaClient.getSummary(system, user);
+    }
 
     const existing = await this.analysisRepository.findOneBy({
       heroId,
@@ -91,9 +117,9 @@ export class AiAnalysisService {
       existing ??
       this.analysisRepository.create({ heroId, patchId: patch.id, patchVersion: patch.version });
 
-    entity.roles = modelOutput.roles;
-    entity.summary = modelOutput.summary;
-    entity.rawModelResponse = modelOutput;
+    entity.roles = roles;
+    entity.summary = summary;
+    entity.rawModelResponse = { roles, summary };
     entity.analyzedAt = new Date();
 
     const saved = await this.analysisRepository.save(entity);

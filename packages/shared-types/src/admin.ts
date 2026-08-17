@@ -9,6 +9,7 @@ export interface AdminMetrics {
   pendingForCurrentPatch: number;
   bulkAnalysis: BulkAnalysisStatus;
   ollamaModel: string;
+  matchStatsCollectedAt: string | null;
 }
 
 export interface AdminHeroSummary {
