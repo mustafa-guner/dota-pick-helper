@@ -10,10 +10,13 @@ export class YouTubeService {
     private readonly videoInsightRepository: Repository<VideoInsight>,
   ) {}
 
+  // Capped since videos now accumulate across days as the channel rotation covers different
+  // sources — without a cap this would grow unbounded and bloat the summary prompt over time.
   getVideoInsights(heroId: number, patchVersion: string): Promise<VideoInsight[]> {
     return this.videoInsightRepository.find({
       where: { heroId, patchVersion },
       order: { publishedAt: 'DESC' },
+      take: 5,
     });
   }
 }

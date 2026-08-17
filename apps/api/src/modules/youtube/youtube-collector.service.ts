@@ -1,18 +1,27 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { Hero } from '../heroes/entities/hero.entity';
 import { PatchSnapshot } from '../patches/entities/patch-snapshot.entity';
-import { PatchesService } from '../patches/patches.service';
 import { VideoInsight } from './entities/video-insight.entity';
-import { YouTubeClientService } from './youtube-client.service';
+import { YouTubeClientService, YouTubeSearchResultItem } from './youtube-client.service';
 
-const RESULTS_PER_HERO = 3;
-// Safety cap regardless of how many heroes a patch touches: 50 searches x 100 quota units/search
-// = 5000, half the YouTube Data API's default 10,000/day budget, leaving headroom for the rest
-// of the day's usage (or a manual re-run).
-const MAX_HEROES_PER_RUN = 50;
-const DELAY_BETWEEN_SEARCHES_MS = 500;
+// User-specified channels (resolved to channel IDs live via the API on 2026-08-18). Only one
+// gets searched per collection run (see MIN_HOURS_BETWEEN_RUNS below) — rotates day by day so
+// each channel gets refreshed roughly every 3rd day.
+const CHANNELS = [
+  { id: 'UCdk_9kcWld5UvflPR3W7A2w', name: 'Dota2 HighSchool' },
+  { id: 'UCwI9DhoGEziLUxTpK8H77jw', name: 'Dota 2 Pro Gameplay [Watch & Learn]' },
+  { id: 'UCC5u0MD-ofrXeauRjIJkrpQ', name: 'Dota 2 ENE TV' },
+];
+
+const RESULTS_PER_RUN = 50; // YouTube's max per search.list call
+// This project's real YouTube Data API quota is 100 units/day (verified live, not the commonly
+// documented 10,000 default), and search.list costs 100 units flat regardless of parameters —
+// so the budget is exactly one search call per day. Guard is DB-backed (last VideoInsight's
+// collectedAt), not in-memory, so a redeploy can't cause two runs the same day and blow the
+// budget — in-memory state resets on every restart, the database doesn't.
+const MIN_HOURS_BETWEEN_RUNS = 20;
 
 interface CollectorStatus {
   lastCollectedAt: string | null;
@@ -21,12 +30,10 @@ interface CollectorStatus {
 }
 
 /**
- * Once-daily (see youtube-collector.scheduler.ts) — searches YouTube for videos about heroes
- * actually changed in the current patch and stores the top few as VideoInsight rows, purely as
- * extra context for the AI's summary text (see role-analysis.prompt.ts) — never used to decide
- * roles, which remain fully stats-driven (role-scoring.service.ts). Scoped to patch-changed
- * heroes only: that's where fresh commentary is most likely to exist, and it keeps daily search
- * volume well under the API's quota.
+ * Once-daily (see youtube-collector.scheduler.ts) — pulls one channel's recent uploads (rotating
+ * through CHANNELS) and matches hero names out of the title/description text, storing hits as
+ * VideoInsight rows. Purely extra context for the AI's summary text (role-analysis.prompt.ts) —
+ * never used to decide roles, which remain fully stats-driven (role-scoring.service.ts).
  */
 @Injectable()
 export class YouTubeCollectorService {
@@ -41,7 +48,6 @@ export class YouTubeCollectorService {
     @InjectRepository(Hero) private readonly heroRepository: Repository<Hero>,
     @InjectRepository(VideoInsight)
     private readonly videoInsightRepository: Repository<VideoInsight>,
-    private readonly patchesService: PatchesService,
     private readonly youtubeClient: YouTubeClientService,
   ) {}
 
@@ -55,68 +61,76 @@ export class YouTubeCollectorService {
       return;
     }
 
-    const heroIds = (await this.patchesService.listChangedHeroIds(patch)).slice(
-      0,
-      MAX_HEROES_PER_RUN,
-    );
-    if (heroIds.length === 0) {
-      this.status = {
-        lastCollectedAt: new Date().toISOString(),
-        patchVersion: patch.version,
-        heroesCovered: 0,
-      };
+    const mostRecent = await this.videoInsightRepository.findOne({
+      order: { collectedAt: 'DESC' },
+    });
+    if (mostRecent && Date.now() - mostRecent.collectedAt.getTime() < MIN_HOURS_BETWEEN_RUNS * 3_600_000) {
+      this.logger.log('Skipping YouTube collection — ran too recently (quota guard: ~1 search/day budget)');
       return;
     }
 
-    const heroes = await this.heroRepository.findBy({ id: In(heroIds) });
+    const channel = CHANNELS[this.pickChannelIndex()];
+    const heroes = await this.heroRepository.find();
 
-    let covered = 0;
-    for (const hero of heroes) {
-      try {
-        await this.collectForOneHero(hero, patch);
-        covered += 1;
-      } catch (error) {
-        this.logger.warn(
-          `YouTube collection failed for hero ${hero.id}: ${(error as Error).message}`,
-        );
+    let results;
+    try {
+      results = await this.youtubeClient.getChannelUploads(channel.id, RESULTS_PER_RUN);
+    } catch (error) {
+      this.logger.warn(`YouTube collection failed: ${(error as Error).message}`);
+      return;
+    }
+
+    const heroesCovered = new Set<number>();
+    for (const item of results) {
+      if (!item.id?.videoId) continue;
+
+      const text = `${item.snippet.title} ${item.snippet.description}`.toLowerCase();
+      const matchedHeroes = heroes.filter((hero) => text.includes(hero.localizedName.toLowerCase()));
+
+      for (const hero of matchedHeroes) {
+        await this.saveInsight(hero.id, patch, item);
+        heroesCovered.add(hero.id);
       }
-      await new Promise((resolve) => setTimeout(resolve, DELAY_BETWEEN_SEARCHES_MS));
     }
 
     this.status = {
       lastCollectedAt: new Date().toISOString(),
       patchVersion: patch.version,
-      heroesCovered: covered,
+      heroesCovered: heroesCovered.size,
     };
     this.logger.log(
-      `YouTube collection finished for patch ${patch.version}: ${covered} heroes searched`,
+      `YouTube collection finished (channel: ${channel.name}): ${heroesCovered.size} heroes matched across ${results.length} videos`,
     );
   }
 
-  private async collectForOneHero(hero: Hero, patch: PatchSnapshot): Promise<void> {
-    const query = `${hero.localizedName} ${patch.version} guide`;
-    const results = await this.youtubeClient.search(query, RESULTS_PER_HERO);
+  private async saveInsight(
+    heroId: number,
+    patch: PatchSnapshot,
+    item: YouTubeSearchResultItem,
+  ): Promise<void> {
+    const existing = await this.videoInsightRepository.findOneBy({
+      heroId,
+      patchVersion: patch.version,
+      videoId: item.id.videoId,
+    });
+    if (existing) return; // same video already recorded for this hero — nothing to update
 
-    await this.videoInsightRepository.delete({ heroId: hero.id, patchVersion: patch.version });
+    await this.videoInsightRepository.save(
+      this.videoInsightRepository.create({
+        heroId,
+        patchId: patch.id,
+        patchVersion: patch.version,
+        videoId: item.id.videoId,
+        title: item.snippet.title,
+        description: item.snippet.description,
+        channelTitle: item.snippet.channelTitle,
+        publishedAt: new Date(item.snippet.publishedAt),
+        collectedAt: new Date(),
+      }),
+    );
+  }
 
-    const rows = results
-      .filter((item) => !!item.id?.videoId)
-      .map((item) =>
-        this.videoInsightRepository.create({
-          heroId: hero.id,
-          patchId: patch.id,
-          patchVersion: patch.version,
-          videoId: item.id.videoId,
-          title: item.snippet.title,
-          description: item.snippet.description,
-          channelTitle: item.snippet.channelTitle,
-          publishedAt: new Date(item.snippet.publishedAt),
-          collectedAt: new Date(),
-        }),
-      );
-
-    if (rows.length > 0) {
-      await this.videoInsightRepository.save(rows);
-    }
+  private pickChannelIndex(): number {
+    return Math.floor(Date.now() / 86_400_000) % CHANNELS.length;
   }
 }
