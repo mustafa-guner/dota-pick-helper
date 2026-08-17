@@ -2,6 +2,7 @@ import { HeroPatchChange, RoleRecommendation } from '@dota-pick-helper/shared-ty
 import { Hero } from '../../heroes/entities/hero.entity';
 import { PatchSnapshot } from '../../patches/entities/patch-snapshot.entity';
 import { HeroLaneStats } from '../../match-stats/entities/hero-lane-stats.entity';
+import { VideoInsight } from '../../youtube/entities/video-insight.entity';
 
 export interface SummaryPromptInput {
   hero: Hero;
@@ -9,6 +10,7 @@ export interface SummaryPromptInput {
   heroChange: HeroPatchChange | null;
   roles: RoleRecommendation[];
   laneStats: HeroLaneStats[];
+  videos: VideoInsight[];
   previous: { patchVersion: string; roles: RoleRecommendation[]; summary: string } | null;
 }
 
@@ -21,12 +23,13 @@ const ROLE_LABELS: Record<string, string> = {
 };
 
 const SYSTEM_PROMPT = `You are a veteran Dota 2 competitive analyst. You are given a hero's kit, \
-this patch's balance changes, and real professional-match win/pick rate data. The role ranking \
-has ALREADY been decided from that real data — your only job is to write a 2-4 sentence \
-explanation of why those roles make sense, grounded in the specific win rates and patch notes \
-given to you. Do not propose different roles, do not contradict the given ranking, and do not \
-invent balance changes that were not listed. Reference concrete numbers (win rate, sample size) \
-and specific patch notes when relevant.`;
+this patch's balance changes, real professional-match win/pick rate data, and optionally a few \
+recent video titles/descriptions about the hero. The role ranking has ALREADY been decided from \
+the match data — your only job is to write a 2-4 sentence explanation of why those roles make \
+sense, grounded primarily in the specific win rates and patch notes given to you. The videos are \
+supplementary color only — you may reference one briefly if it genuinely supports the ranking, \
+but never let video content contradict or override the given roles, and do not invent balance \
+changes that were not listed. Reference concrete numbers (win rate, sample size) when relevant.`;
 
 function formatAbilities(hero: Hero): string {
   return hero.abilities.map((a) => `- ${a.localizedName}: ${a.description}`).join('\n');
@@ -62,6 +65,13 @@ function formatRoles(roles: RoleRecommendation[], laneStats: HeroLaneStats[]): s
     .join('\n');
 }
 
+function formatVideos(videos: VideoInsight[]): string {
+  if (videos.length === 0) return 'No relevant videos found for this patch.';
+  return videos
+    .map((v) => `- "${v.title}" (${v.channelTitle}): ${v.description}`)
+    .join('\n');
+}
+
 function formatPrevious(previous: SummaryPromptInput['previous']): string {
   if (!previous) return 'No prior analysis on record for this hero.';
   const roles = previous.roles
@@ -72,7 +82,7 @@ function formatPrevious(previous: SummaryPromptInput['previous']): string {
 }
 
 export function buildSummaryPrompt(input: SummaryPromptInput): { system: string; user: string } {
-  const { hero, patch, heroChange, roles, laneStats, previous } = input;
+  const { hero, patch, heroChange, roles, laneStats, videos, previous } = input;
 
   const user = `HERO: ${hero.localizedName} (${hero.primaryAttr === 'all' ? 'Universal' : hero.primaryAttr}, ${hero.attackType})
 
@@ -86,6 +96,9 @@ ${formatHeroChange(heroChange)}
 
 ALREADY-DECIDED ROLE RANKING (from real professional-match data — explain this, do not change it):
 ${formatRoles(roles, laneStats)}
+
+RECENT VIDEOS ABOUT THIS HERO THIS PATCH (optional color — reference only if genuinely relevant, never let this override the role ranking above):
+${formatVideos(videos)}
 
 PREVIOUS PATCH ANALYSIS (for continuity — call out if the role has shifted and why):
 ${formatPrevious(previous)}

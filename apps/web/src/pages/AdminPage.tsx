@@ -180,6 +180,12 @@ export default function AdminPage() {
                 ? new Date(metrics.matchStatsCollectedAt).toLocaleString()
                 : 'Never',
             ],
+            [
+              'Videos collected',
+              metrics.youtubeCollectedAt
+                ? `${new Date(metrics.youtubeCollectedAt).toLocaleString()} (${metrics.youtubeHeroesCovered} heroes)`
+                : 'Never',
+            ],
           ].map(([label, value]) => (
             <div
               key={label}

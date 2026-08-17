@@ -9,6 +9,7 @@ import { PatchesService } from '../patches/patches.service';
 import { BulkAnalysisService } from '../ai-analysis/bulk-analysis.service';
 import { AiAnalysisService } from '../ai-analysis/ai-analysis.service';
 import { MatchStatsCollectorService } from '../match-stats/match-stats-collector.service';
+import { YouTubeCollectorService } from '../youtube/youtube-collector.service';
 
 interface HeroWithAnalysisRow {
   id: number;
@@ -30,6 +31,7 @@ export class AdminService {
     private readonly bulkAnalysisService: BulkAnalysisService,
     private readonly aiAnalysisService: AiAnalysisService,
     private readonly matchStatsCollectorService: MatchStatsCollectorService,
+    private readonly youtubeCollectorService: YouTubeCollectorService,
     private readonly configService: ConfigService,
   ) {}
 
@@ -51,6 +53,8 @@ export class AdminService {
       ollamaModel: this.configService.get<string>('ollamaModel') ?? 'llama3.1',
       matchStatsCollectedAt: this.matchStatsCollectorService.getStatus().lastCollectedAt,
       analyzingHeroIds: this.aiAnalysisService.getAnalyzingHeroIds(),
+      youtubeCollectedAt: this.youtubeCollectorService.getStatus().lastCollectedAt,
+      youtubeHeroesCovered: this.youtubeCollectorService.getStatus().heroesCovered,
     };
   }
 

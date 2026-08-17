@@ -48,6 +48,16 @@ export class PatchesService {
     };
   }
 
+  /** Hero IDs with explicit balance notes in this patch — used to scope quota-limited work
+   * (e.g. YouTube search) to heroes actually worth looking up instead of the whole roster. */
+  async listChangedHeroIds(patch: PatchSnapshot): Promise<number[]> {
+    const rows = await this.heroPatchChangeRepository.find({
+      where: { patchId: patch.id },
+      select: ['heroId'],
+    });
+    return rows.map((row) => row.heroId);
+  }
+
   private async ingestSnapshot(version: string): Promise<PatchSnapshot> {
     const notes = await this.patchFeedClient.fetchPatchNotes(version);
 

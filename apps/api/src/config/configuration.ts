@@ -10,4 +10,5 @@ export default () => ({
   adminUsername: process.env.ADMIN_USERNAME,
   adminPassword: process.env.ADMIN_PASSWORD,
   adminTokenSecret: process.env.ADMIN_TOKEN_SECRET,
+  youtubeApiKey: process.env.YOUTUBE_API_KEY || null,
 });

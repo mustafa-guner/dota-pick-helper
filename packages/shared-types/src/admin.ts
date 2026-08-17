@@ -11,6 +11,8 @@ export interface AdminMetrics {
   ollamaModel: string;
   matchStatsCollectedAt: string | null;
   analyzingHeroIds: number[];
+  youtubeCollectedAt: string | null;
+  youtubeHeroesCovered: number;
 }
 
 export interface AdminHeroSummary {

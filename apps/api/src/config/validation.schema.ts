@@ -14,4 +14,6 @@ export const validationSchema = Joi.object({
   ADMIN_USERNAME: Joi.string().required(),
   ADMIN_PASSWORD: Joi.string().required(),
   ADMIN_TOKEN_SECRET: Joi.string().required(),
+  // Optional — if unset, YouTubeCollectorService no-ops with a warning instead of failing boot.
+  YOUTUBE_API_KEY: Joi.string().optional().allow(''),
 });

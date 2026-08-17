@@ -7,6 +7,7 @@ import { HeroesModule } from '../heroes/heroes.module';
 import { AiAnalysisModule } from '../ai-analysis/ai-analysis.module';
 import { PatchesModule } from '../patches/patches.module';
 import { MatchStatsModule } from '../match-stats/match-stats.module';
+import { YouTubeModule } from '../youtube/youtube.module';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
 import { AdminAuthService } from './admin-auth.service';
@@ -19,6 +20,7 @@ import { AdminAuthGuard } from './admin-auth.guard';
     AiAnalysisModule,
     PatchesModule,
     MatchStatsModule,
+    YouTubeModule,
   ],
   controllers: [AdminController],
   providers: [AdminService, AdminAuthService, AdminAuthGuard],

@@ -7,6 +7,7 @@ import { PatchSnapshot } from '../patches/entities/patch-snapshot.entity';
 import { PatchesService } from '../patches/patches.service';
 import { MatchStatsService } from '../match-stats/match-stats.service';
 import { MatchStatsCollectorService } from '../match-stats/match-stats-collector.service';
+import { YouTubeService } from '../youtube/youtube.service';
 import { OllamaClientService } from './ollama-client.service';
 import { RoleScoringService } from './role-scoring.service';
 import { HeroRoleAnalysis } from './entities/hero-role-analysis.entity';
@@ -26,6 +27,7 @@ export class AiAnalysisService {
     private readonly patchesService: PatchesService,
     private readonly matchStatsService: MatchStatsService,
     private readonly matchStatsCollectorService: MatchStatsCollectorService,
+    private readonly youtubeService: YouTubeService,
     private readonly roleScoringService: RoleScoringService,
     private readonly ollamaClient: OllamaClientService,
   ) {}
@@ -108,10 +110,11 @@ export class AiAnalysisService {
       if (roles.length === 0) {
         summary = NO_DATA_SUMMARY;
       } else {
-        const [heroChange, previous, laneStats] = await Promise.all([
+        const [heroChange, previous, laneStats, videos] = await Promise.all([
           this.patchesService.getHeroChange(heroId, patch),
           this.findPreviousAnalysis(heroId, patch),
           this.matchStatsService.getLaneStats(heroId, patch.version),
+          this.youtubeService.getVideoInsights(heroId, patch.version),
         ]);
 
         const { system, user } = buildSummaryPrompt({
@@ -120,6 +123,7 @@ export class AiAnalysisService {
           heroChange,
           roles,
           laneStats,
+          videos,
           previous,
         });
         summary = await this.ollamaClient.getSummary(system, user);
