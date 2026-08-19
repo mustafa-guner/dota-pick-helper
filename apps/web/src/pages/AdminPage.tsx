@@ -91,6 +91,53 @@ export default function AdminPage() {
     },
   });
 
+  const channelsQuery = useQuery({
+    queryKey: ['admin', 'youtubeChannels'],
+    queryFn: adminApi.listYoutubeChannels,
+    enabled: authed,
+  });
+
+  const [channelInput, setChannelInput] = useState('');
+  const [channelError, setChannelError] = useState<string | null>(null);
+
+  const addChannelMutation = useMutation({
+    mutationFn: (input: string) => adminApi.addYoutubeChannel(input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'youtubeChannels'] });
+      setChannelInput('');
+      setChannelError(null);
+    },
+    onError: (error) => {
+      setChannelError(error instanceof Error ? error.message : 'Could not add that channel.');
+    },
+  });
+
+  const removeChannelMutation = useMutation({
+    mutationFn: (id: string) => adminApi.removeYoutubeChannel(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'youtubeChannels'] });
+    },
+  });
+
+  const [collectResult, setCollectResult] = useState<string | null>(null);
+
+  const collectNowMutation = useMutation({
+    mutationFn: adminApi.collectYoutubeNow,
+    onSuccess: (status) => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'metrics'] });
+      setCollectResult(
+        status.heroesCovered > 0
+          ? `Matched ${status.heroesCovered} heroes from today's channel.`
+          : 'Ran, but no hero names matched in that channel\'s recent uploads.',
+      );
+    },
+    onError: (error) => {
+      setCollectResult(
+        error instanceof Error ? `Failed: ${error.message}` : 'Collection failed — check the quota.',
+      );
+    },
+  });
+
   const [notice, setNotice] = useState<string | null>(null);
 
   const analyzeMutation = useMutation({
@@ -317,6 +364,95 @@ export default function AdminPage() {
           </tbody>
         </table>
       </div>
+
+      <section className="mt-10">
+        <h2 className="mb-2 text-lg font-semibold text-white">YouTube Channels</h2>
+        <p className="mb-4 text-xs text-gray-500">
+          One channel is searched per day, rotating through the list below — this Google Cloud
+          project's real quota is 100 units/day and a single search costs 100, so only one
+          channel can be checked per day regardless of how many are configured.
+        </p>
+
+        <div className="mb-4 overflow-x-auto rounded-lg border border-dota-border">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-dota-panel-alt text-xs uppercase text-gray-500">
+              <tr>
+                <th className="px-3 py-2">Channel</th>
+                <th className="px-3 py-2">Channel ID</th>
+                <th className="px-3 py-2" />
+              </tr>
+            </thead>
+            <tbody>
+              {channelsQuery.data?.map((channel) => (
+                <tr key={channel.id} className="border-t border-dota-border">
+                  <td className="px-3 py-2 text-white">{channel.label}</td>
+                  <td className="px-3 py-2 text-gray-500">{channel.channelId}</td>
+                  <td className="px-3 py-2 text-right">
+                    <button
+                      onClick={() => removeChannelMutation.mutate(channel.id)}
+                      disabled={removeChannelMutation.isPending}
+                      className="rounded-md border border-dota-border px-2.5 py-1 text-xs text-gray-300 hover:border-str/60 hover:text-str disabled:opacity-50"
+                    >
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {channelsQuery.data?.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="px-3 py-4 text-center text-gray-500">
+                    No channels configured — video collection will skip until one is added.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (channelInput.trim()) addChannelMutation.mutate(channelInput.trim());
+          }}
+          className="mb-2 flex flex-wrap gap-2"
+        >
+          <input
+            type="text"
+            value={channelInput}
+            onChange={(e) => setChannelInput(e.target.value)}
+            placeholder="Channel URL or @handle (e.g. youtube.com/@SomeChannel)"
+            className="min-w-[20rem] flex-1 rounded-md border border-dota-border bg-dota-panel-alt px-3 py-1.5 text-sm text-white outline-none focus:border-gold/60"
+          />
+          <button
+            type="submit"
+            disabled={addChannelMutation.isPending || !channelInput.trim()}
+            className="rounded-md border border-dota-border px-3 py-1.5 text-xs text-gray-300 hover:border-gold/60 hover:text-gold disabled:opacity-50"
+          >
+            {addChannelMutation.isPending ? 'Adding…' : 'Add channel'}
+          </button>
+        </form>
+        {channelError && <p className="mb-4 text-xs text-red-300">{channelError}</p>}
+
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => {
+              if (
+                window.confirm(
+                  "Run video collection right now? This uses today's entire YouTube API quota (100/100 units) — the daily automatic run will effectively be skipped today. Continue?",
+                )
+              ) {
+                setCollectResult(null);
+                collectNowMutation.mutate();
+              }
+            }}
+            disabled={collectNowMutation.isPending}
+            className="rounded-md border border-dota-border px-3 py-1.5 text-xs text-gray-300 hover:border-gold/60 hover:text-gold disabled:opacity-50"
+          >
+            {collectNowMutation.isPending ? 'Collecting…' : 'Collect videos now'}
+          </button>
+          {collectResult && <span className="text-xs text-gray-400">{collectResult}</span>}
+        </div>
+      </section>
     </div>
   );
 }

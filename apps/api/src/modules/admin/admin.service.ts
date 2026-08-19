@@ -37,11 +37,14 @@ export class AdminService {
 
   async getMetrics(): Promise<AdminMetrics> {
     const patch = await this.patchesService.getOrRefreshLatest();
-    const [totalHeroes, analyzedForCurrentPatch, pendingForCurrentPatch] = await Promise.all([
-      this.heroRepository.count(),
-      this.analysisRepository.count({ where: { patchVersion: patch.version } }),
-      this.bulkAnalysisService.countPending(patch.version),
-    ]);
+    const [totalHeroes, analyzedForCurrentPatch, pendingForCurrentPatch, matchStatsStatus, youtubeStatus] =
+      await Promise.all([
+        this.heroRepository.count(),
+        this.analysisRepository.count({ where: { patchVersion: patch.version } }),
+        this.bulkAnalysisService.countPending(patch.version),
+        this.matchStatsCollectorService.getStatus(),
+        this.youtubeCollectorService.getStatus(),
+      ]);
 
     return {
       patchVersion: patch.version,
@@ -51,10 +54,10 @@ export class AdminService {
       pendingForCurrentPatch,
       bulkAnalysis: this.bulkAnalysisService.getStatus(),
       ollamaModel: this.configService.get<string>('ollamaModel') ?? 'llama3.1',
-      matchStatsCollectedAt: this.matchStatsCollectorService.getStatus().lastCollectedAt,
+      matchStatsCollectedAt: matchStatsStatus.lastCollectedAt,
       analyzingHeroIds: this.aiAnalysisService.getAnalyzingHeroIds(),
-      youtubeCollectedAt: this.youtubeCollectorService.getStatus().lastCollectedAt,
-      youtubeHeroesCovered: this.youtubeCollectorService.getStatus().heroesCovered,
+      youtubeCollectedAt: youtubeStatus.lastCollectedAt,
+      youtubeHeroesCovered: youtubeStatus.heroesCovered,
     };
   }
 

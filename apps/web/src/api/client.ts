@@ -6,6 +6,8 @@ import type {
   HeroesGrouped,
   RoleAnalysis,
   RoleHistoryEntry,
+  YouTubeChannelDto,
+  YouTubeCollectorStatus,
 } from '@dota-pick-helper/shared-types';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api';
@@ -28,7 +30,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new ApiError(`Request to ${path} failed (${res.status}): ${body}`, res.status);
+    // Nest's default error shape is { statusCode, message, error } — surface just the message
+    // when present so the UI can show a clean sentence instead of a raw JSON blob.
+    let message = `Request to ${path} failed (${res.status})`;
+    try {
+      const parsed = JSON.parse(body) as { message?: string | string[] };
+      if (typeof parsed.message === 'string') message = parsed.message;
+      else if (Array.isArray(parsed.message)) message = parsed.message.join(', ');
+    } catch {
+      if (body) message = body;
+    }
+    throw new ApiError(message, res.status);
   }
 
   return res.json() as Promise<T>;
@@ -76,4 +88,14 @@ export const adminApi = {
   triggerFullReanalysis: () =>
     adminRequest<BulkAnalysisStatus>('/admin/reanalyze-all', { method: 'POST' }),
   getBulkAnalysisStatus: () => adminRequest<BulkAnalysisStatus>('/admin/analyze-all/status'),
+  listYoutubeChannels: () => adminRequest<YouTubeChannelDto[]>('/admin/youtube/channels'),
+  addYoutubeChannel: (input: string) =>
+    adminRequest<YouTubeChannelDto>('/admin/youtube/channels', {
+      method: 'POST',
+      body: JSON.stringify({ input }),
+    }),
+  removeYoutubeChannel: (id: string) =>
+    adminRequest<{ removed: true }>(`/admin/youtube/channels/${id}`, { method: 'DELETE' }),
+  collectYoutubeNow: () =>
+    adminRequest<YouTubeCollectorStatus>('/admin/youtube/collect-now', { method: 'POST' }),
 };

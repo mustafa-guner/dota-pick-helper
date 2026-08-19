@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -17,14 +18,20 @@ import {
   AdminMetrics,
   BulkAnalysisStatus,
   RoleAnalysis,
+  YouTubeChannelDto,
+  YouTubeCollectorStatus,
 } from '@dota-pick-helper/shared-types';
 import { AdminAuthService } from './admin-auth.service';
 import { AdminAuthGuard } from './admin-auth.guard';
 import { AdminService } from './admin.service';
 import { LoginDto } from './dto/login.dto';
+import { AddYouTubeChannelDto } from './dto/add-youtube-channel.dto';
 import { HeroSyncService } from '../heroes/hero-sync.service';
 import { AiAnalysisService } from '../ai-analysis/ai-analysis.service';
 import { BulkAnalysisService } from '../ai-analysis/bulk-analysis.service';
+import { PatchesService } from '../patches/patches.service';
+import { YouTubeChannelsService } from '../youtube/youtube-channels.service';
+import { YouTubeCollectorService } from '../youtube/youtube-collector.service';
 
 @Controller('admin')
 export class AdminController {
@@ -34,6 +41,9 @@ export class AdminController {
     private readonly heroSyncService: HeroSyncService,
     private readonly aiAnalysisService: AiAnalysisService,
     private readonly bulkAnalysisService: BulkAnalysisService,
+    private readonly patchesService: PatchesService,
+    private readonly youtubeChannelsService: YouTubeChannelsService,
+    private readonly youtubeCollectorService: YouTubeCollectorService,
   ) {}
 
   @Post('login')
@@ -90,5 +100,35 @@ export class AdminController {
   @UseGuards(AdminAuthGuard)
   getBulkAnalysisStatus(): BulkAnalysisStatus {
     return this.bulkAnalysisService.getStatus();
+  }
+
+  @Get('youtube/channels')
+  @UseGuards(AdminAuthGuard)
+  listYoutubeChannels(): Promise<YouTubeChannelDto[]> {
+    return this.youtubeChannelsService.list();
+  }
+
+  @Post('youtube/channels')
+  @UseGuards(AdminAuthGuard)
+  addYoutubeChannel(@Body() body: AddYouTubeChannelDto): Promise<YouTubeChannelDto> {
+    return this.youtubeChannelsService.add(body.input);
+  }
+
+  @Delete('youtube/channels/:id')
+  @UseGuards(AdminAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async removeYoutubeChannel(@Param('id') id: string): Promise<{ removed: true }> {
+    await this.youtubeChannelsService.remove(id);
+    return { removed: true };
+  }
+
+  // Bypasses the collector's usual quota guard — a deliberate admin action, not an accidental
+  // redeploy-triggered double-run. Costs the entire day's search quota (100 units); confirmed
+  // client-side before this is called.
+  @Post('youtube/collect-now')
+  @UseGuards(AdminAuthGuard)
+  async collectYoutubeNow(): Promise<YouTubeCollectorStatus> {
+    const patch = await this.patchesService.getOrRefreshLatest();
+    return this.youtubeCollectorService.collectForPatch(patch, { force: true });
   }
 }

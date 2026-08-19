@@ -18,6 +18,7 @@ export type {
 export type { RoleRecommendation, RoleAnalysis, RoleHistoryEntry } from './role-analysis';
 export type { BulkAnalysisStatus, BulkAnalysisPhase } from './bulk-analysis';
 export type { AdminMetrics, AdminHeroSummary } from './admin';
+export type { YouTubeChannelDto, YouTubeCollectorStatus } from './youtube';
 
 // A const object (not a TS `enum`) — enums compile to an IIFE-wrapped assignment that
 // Rollup's commonjs interop can't statically detect as a named export, which breaks bundling

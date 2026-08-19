@@ -59,7 +59,6 @@ interface CollectorStatus {
 @Injectable()
 export class MatchStatsCollectorService {
   private readonly logger = new Logger(MatchStatsCollectorService.name);
-  private status: CollectorStatus = { lastCollectedAt: null, patchVersion: null };
 
   constructor(
     @InjectRepository(Hero) private readonly heroRepository: Repository<Hero>,
@@ -68,8 +67,18 @@ export class MatchStatsCollectorService {
     private readonly explorer: OpenDotaExplorerService,
   ) {}
 
-  getStatus(): CollectorStatus {
-    return { ...this.status };
+  /** Derived from the database (not in-memory) so it reflects real history even right after a
+   * restart — an in-memory field would reset to "Never" on every redeploy despite real past
+   * collections. */
+  async getStatus(): Promise<CollectorStatus> {
+    const mostRecent = await this.laneStatsRepository.findOne({
+      where: {},
+      order: { collectedAt: 'DESC' },
+    });
+    return {
+      lastCollectedAt: mostRecent ? mostRecent.collectedAt.toISOString() : null,
+      patchVersion: mostRecent ? mostRecent.patchVersion : null,
+    };
   }
 
   async collectForPatch(
@@ -84,7 +93,6 @@ export class MatchStatsCollectorService {
       await new Promise((resolve) => setTimeout(resolve, DELAY_BETWEEN_HEROES_MS));
     }
 
-    this.status = { lastCollectedAt: new Date().toISOString(), patchVersion: patch.version };
     this.logger.log(`Match stats collection finished for patch ${patch.version}`);
   }
 

@@ -17,7 +17,17 @@ interface YouTubeSearchResponse {
   items: YouTubeSearchResultItem[];
 }
 
+export interface ResolvedChannel {
+  id: string;
+  title: string;
+}
+
+interface YouTubeChannelsResponse {
+  items: { id: string; snippet: { title: string } }[];
+}
+
 const SEARCH_URL = 'https://www.googleapis.com/youtube/v3/search';
+const CHANNELS_URL = 'https://www.googleapis.com/youtube/v3/channels';
 
 @Injectable()
 export class YouTubeClientService {
@@ -52,5 +62,34 @@ export class YouTubeClientService {
       }),
     );
     return res.data.items ?? [];
+  }
+
+  /** channels.list is a separate, much cheaper quota bucket than search.list (verified live —
+   * it kept working after search.list was already exhausted for the day). Used to resolve a
+   * pasted channel URL/@handle to its real channel ID without touching the precious 100-unit
+   * search budget. */
+  async resolveChannelById(channelId: string): Promise<ResolvedChannel | null> {
+    return this.resolveChannel({ id: channelId });
+  }
+
+  async resolveChannelByHandle(handle: string): Promise<ResolvedChannel | null> {
+    return this.resolveChannel({ forHandle: handle });
+  }
+
+  private async resolveChannel(
+    params: { id: string } | { forHandle: string },
+  ): Promise<ResolvedChannel | null> {
+    const apiKey = this.configService.get<string>('youtubeApiKey');
+    if (!apiKey) {
+      throw new Error('YOUTUBE_API_KEY is not configured');
+    }
+
+    const res = await firstValueFrom(
+      this.httpService.get<YouTubeChannelsResponse>(CHANNELS_URL, {
+        params: { part: 'snippet', key: apiKey, ...params },
+      }),
+    );
+    const item = res.data.items?.[0];
+    return item ? { id: item.id, title: item.snippet.title } : null;
   }
 }
